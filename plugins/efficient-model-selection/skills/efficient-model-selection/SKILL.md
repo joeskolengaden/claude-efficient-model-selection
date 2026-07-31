@@ -1,6 +1,6 @@
 ---
 name: efficient-model-selection
-description: Standing guidance for picking which model tier (Haiku, Sonnet, Opus, or Fable) to run a delegated task or sub-task on — via the Agent tool's model parameter, a Workflow script's agent() calls, or when planning any multi-step task whose pieces differ in difficulty. Consult this BEFORE spawning any subagent or authoring a Workflow, not just when the user says "efficiently" or "cheaply" — it applies by default to every delegation decision. Reserves the most capable/expensive tier (Fable) for work that genuinely needs deep, ambiguous, or high-stakes reasoning, and defaults everything else to a cheaper, faster tier. Does not apply to the main conversation's own model, which the user sets directly via /model.
+description: Standing guidance for picking which model tier (Haiku, Sonnet, Opus, or Fable) to run a delegated task or sub-task on — via the Agent tool's model parameter, a Workflow script's agent() calls, or when planning any multi-step task whose pieces differ in difficulty. Consult this BEFORE spawning any subagent or authoring a Workflow, not just when the user says "efficiently" or "cheaply" — it applies by default to every delegation decision. Reserves the most capable/expensive tier (Fable) for work that genuinely needs deep, ambiguous, or high-stakes reasoning, and defaults everything else to a cheaper, faster tier. Also governs reporting: state which tier was used whenever delegated work is reported back to the user, every time, not just when asked. Does not apply to the main conversation's own model, which the user sets directly via /model.
 ---
 
 # Efficient model selection for delegated work
@@ -95,6 +95,16 @@ that reliably does the job, not the newest one available.
 - Don't guess at model ID strings you're not confident are valid — an unrecognized ID fails the call.
   Only pin an older generation when you have it from context (the system prompt, or the user telling
   you what's available); otherwise let the tier resolve to its current default.
+
+## Report the choice back to the user
+
+Picking the right tier is only half of this — the user generally can't see which model a
+delegated call used just from the tool call itself. When you report the result of delegated work
+back to the user (a subagent's findings, a Workflow's output), state which tier handled it as part
+of that report — e.g. "ran on Haiku" / "the synthesis step used Sonnet, the judgment call used
+Opus" — not as a separate aside, just a short tag alongside the result. Do this by default, every
+time, not only when asked. This is what makes the tier choice a decision the user can actually see
+and correct, rather than one made silently on their behalf.
 
 ## Quick reference
 
