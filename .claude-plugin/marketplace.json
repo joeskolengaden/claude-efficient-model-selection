@@ -1,0 +1,21 @@
+{
+  "name": "claude-efficient-model-selection",
+  "owner": {
+    "name": "joeskolengaden",
+    "url": "https://github.com/joeskolengaden"
+  },
+  "description": "A single skill: standing guidance for picking the cheapest model tier that reliably does a delegated task, instead of defaulting to the most capable one.",
+  "plugins": [
+    {
+      "name": "efficient-model-selection",
+      "source": "./plugins/efficient-model-selection",
+      "description": "Guidance for choosing Haiku/Sonnet/Opus/Fable per delegated task or Workflow step, based on what the task actually needs.",
+      "version": "1.0.0",
+      "author": {
+        "name": "joeskolengaden"
+      },
+      "category": "productivity",
+      "tags": ["model-selection", "efficiency", "subagents"]
+    }
+  ]
+}
