@@ -4,12 +4,12 @@
     "name": "joeskolengaden",
     "url": "https://github.com/joeskolengaden"
   },
-  "description": "A single skill: standing guidance for picking the cheapest model tier that reliably does a delegated task, instead of defaulting to the most capable one.",
+  "description": "A single skill: standing guidance for picking the cheapest model tier that reliably does a delegated task, reporting the choice and why, honoring direct overrides, and escalating one tier up if a result comes up short.",
   "plugins": [
     {
       "name": "efficient-model-selection",
       "source": "./plugins/efficient-model-selection",
-      "description": "Guidance for choosing Haiku/Sonnet/Opus/Fable per delegated task or Workflow step, based on what the task actually needs.",
+      "description": "Guidance for choosing Haiku/Sonnet/Opus/Fable per delegated task or Workflow step — plus reporting why, honoring overrides, and escalating on failure.",
       "author": {
         "name": "joeskolengaden"
       },

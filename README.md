@@ -161,9 +161,22 @@ For the desktop app, re-download and re-upload the `.skill` file to update; remo
 .claude-plugin/marketplace.json                                              marketplace catalog
 plugins/efficient-model-selection/.claude-plugin/plugin.json                 plugin manifest
 plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md  the skill itself
+build.sh                                                                     rebuilds the .skill package
+.github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
 
 Built per the official schema in [Create and distribute a plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces).
+
+### After editing SKILL.md
+
+Run `./build.sh` and commit the regenerated `efficient-model-selection.skill` alongside it. CI
+checks this on every push/PR that touches either file — it verifies the packaged content matches
+the source and that the description stays under the desktop app's 1024-char limit, and fails the
+check if either drifts. It's deliberately verify-only rather than auto-rebuilding: this repo isn't
+persistently cloned anywhere a commit hook could live, and `zip` output isn't byte-reproducible
+(embeds mtimes), so an auto-rebuild-on-commit hook would churn the binary on every commit,
+including ones that don't touch the skill at all. A loud failure on a real staleness bug is the
+right amount of machinery for a repo touched a handful of times a year by one person.
 
 ## License
 

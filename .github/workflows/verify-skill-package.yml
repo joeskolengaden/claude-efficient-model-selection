@@ -1,0 +1,61 @@
+name: Verify skill package
+
+# Deliberately verify-only, not auto-rebuild. An auto-committing hook or Action was considered
+# and rejected: this repo isn't cloned persistently anywhere a pre-commit hook could live, `zip`
+# output isn't reproducible (embeds mtimes), so a rebuild-on-commit hook would churn the binary
+# on every commit including unrelated ones, and a write-scoped bot Action is a permanent
+# ergonomic tax against a repo touched a handful of times a year by one person. A loud failure
+# on a stale/oversized artifact is the right amount of machinery here — see build.sh.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md'
+      - 'efficient-model-selection.skill'
+  pull_request:
+    paths:
+      - 'plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md'
+      - 'efficient-model-selection.skill'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Packaged .skill content matches source SKILL.md
+        run: |
+          python3 - <<'EOF'
+          import zipfile, sys
+          from pathlib import Path
+
+          src = Path("plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md").read_text()
+          with zipfile.ZipFile("efficient-model-selection.skill") as zf:
+              packaged = zf.read("efficient-model-selection/SKILL.md").decode()
+
+          if src != packaged:
+              print("::error::efficient-model-selection.skill is stale — its SKILL.md doesn't "
+                    "match the source. Run ./build.sh and commit the result.")
+              sys.exit(1)
+          print("OK: packaged .skill content matches source SKILL.md")
+          EOF
+
+      - name: SKILL.md description is within the 1024-char limit
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          from pathlib import Path
+
+          content = Path("plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md").read_text()
+          m = re.search(r'^description:\s*(.+)$', content, re.MULTILINE)
+          if not m:
+              print("::error::No description field found in SKILL.md frontmatter")
+              sys.exit(1)
+          length = len(m.group(1))
+          if length > 1024:
+              print(f"::error::SKILL.md description is {length} chars, over the 1024 limit "
+                    f"the desktop app enforces on upload ({length - 1024} over).")
+              sys.exit(1)
+          print(f"OK: description is {length}/1024 chars")
+          EOF
