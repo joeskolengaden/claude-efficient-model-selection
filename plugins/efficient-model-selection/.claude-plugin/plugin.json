@@ -1,11 +1,11 @@
 {
   "name": "efficient-model-selection",
-  "description": "Standing guidance for picking the cheapest model tier that reliably does the job when delegating work to subagents or Workflow steps, reserving the most capable tier for genuinely hard reasoning. Also requires reporting which tier was used back to the user.",
-  "version": "1.1.0",
+  "description": "Standing guidance for picking the cheapest model tier that reliably does the job when delegating work to subagents or Workflow steps, reserving the most capable tier for genuinely hard reasoning. Also requires reporting which tier was used and why, honors direct user overrides immediately, and escalates one tier up when a chosen tier's result turns out inadequate.",
+  "version": "1.2.0",
   "author": {
     "name": "joeskolengaden"
   },
   "homepage": "https://github.com/joeskolengaden/claude-efficient-model-selection",
   "license": "MIT",
-  "keywords": ["model-selection", "cost-efficiency", "delegation", "subagents", "workflow"]
+  "keywords": ["model-selection", "cost-efficiency", "delegation", "subagents", "workflow", "escalation"]
 }

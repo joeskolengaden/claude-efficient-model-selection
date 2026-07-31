@@ -1,6 +1,6 @@
 ---
 name: efficient-model-selection
-description: Standing guidance for picking which model tier (Haiku, Sonnet, Opus, or Fable) to run a delegated task or sub-task on — via the Agent tool's model parameter, a Workflow script's agent() calls, or when planning any multi-step task whose pieces differ in difficulty. Consult this BEFORE spawning any subagent or authoring a Workflow, not just when the user says "efficiently" or "cheaply" — it applies by default to every delegation decision. Reserves the most capable/expensive tier (Fable) for work that genuinely needs deep, ambiguous, or high-stakes reasoning, and defaults everything else to a cheaper, faster tier. Also governs reporting: state which tier was used whenever delegated work is reported back to the user, every time, not just when asked. Does not apply to the main conversation's own model, which the user sets directly via /model.
+description: Standing guidance for picking which model tier (Haiku, Sonnet, Opus, or Fable) to run a delegated task or sub-task on — via the Agent tool's model parameter, a Workflow script's agent() calls, or when planning any multi-step task whose pieces differ in difficulty. Consult this BEFORE spawning any subagent or authoring a Workflow, not just when the user says "efficiently" or "cheaply" — it applies by default to every delegation decision, in every scenario, with no exceptions carved out. Reserves the most capable/expensive tier (Fable) for work that genuinely needs deep, ambiguous, or high-stakes reasoning, and defaults everything else to a cheaper, faster tier. Also governs: (1) reporting — state which tier was used AND why, every time delegated work is reported back, not just when asked; (2) user override — a direct instruction about which model to use always wins immediately, before or after a choice was already made; (3) escalation — if a chosen tier's result turns out inadequate for the actual task, retry one tier up rather than accepting the bad result or silently retrying the same tier. Does not apply to the main conversation's own model, which the user sets directly via /model.
 ---
 
 # Efficient model selection for delegated work
@@ -58,10 +58,10 @@ batch on one model picked for the hardest part. Break it up and give each piece 
 a workflow that fetches data (Haiku), synthesizes it into a report (Sonnet), and makes a judgment
 call about what to do with the findings (Opus) should use three different `model` values, not one.
 
-**Default down when unsure, escalate on evidence.** If you can't immediately tell whether a task is
-Sonnet or Opus, start with the cheaper tier. If the result is inadequate, re-run the specific failed
-piece one tier up — this costs less overall than defaulting every uncertain case to the expensive
-tier "to be safe," and you only pay for the extra capability on the pieces that actually needed it.
+**Default down when unsure.** If you can't immediately tell whether a task is Sonnet or Opus, start
+with the cheaper tier — this costs less overall than defaulting every uncertain case to the
+expensive tier "to be safe." See "Escalate when a tier fails the task" below for what to do if that
+bet doesn't pay off.
 
 **In the `Agent` tool:** pass `model: "haiku" | "sonnet" | "opus" | "fable"` per call, chosen per
 the rubric above. Omitting it inherits the session's main-loop model — do this only when you
@@ -96,15 +96,63 @@ that reliably does the job, not the newest one available.
   Only pin an older generation when you have it from context (the system prompt, or the user telling
   you what's available); otherwise let the tier resolve to its current default.
 
-## Report the choice back to the user
+## Report the choice — and why — back to the user
 
 Picking the right tier is only half of this — the user generally can't see which model a
 delegated call used just from the tool call itself. When you report the result of delegated work
-back to the user (a subagent's findings, a Workflow's output), state which tier handled it as part
-of that report — e.g. "ran on Haiku" / "the synthesis step used Sonnet, the judgment call used
-Opus" — not as a separate aside, just a short tag alongside the result. Do this by default, every
-time, not only when asked. This is what makes the tier choice a decision the user can actually see
-and correct, rather than one made silently on their behalf.
+back to the user (a subagent's findings, a Workflow's output), state which tier handled it *and a
+short reason why*, as part of that report — e.g. "ran on Haiku (mechanical file listing, no
+judgment needed)" / "the synthesis step used Sonnet (weighing a few sources), the judgment call
+used Opus (real ambiguity in the tradeoffs)". A tier name alone doesn't let the user tell whether
+the choice was reasonable; the reason is what makes it checkable. Keep it to a clause, not a
+paragraph — this is a tag alongside the result, not a justification essay. Do this by default,
+every time, not only when asked.
+
+## The user can always override
+
+A direct instruction about which model to use always wins, immediately, no pushback — this
+overrides the rubric outright, not just as a tiebreaker. This applies whether the instruction comes:
+
+- **Before delegating** — the user says "use Opus for this" before you've made a choice: use Opus,
+  don't re-litigate whether the rubric would have picked something cheaper.
+- **After seeing a report** — the user says "redo that on a better model" after seeing a Haiku or
+  Sonnet result: re-run the same task one or more tiers up as requested, don't defend the original
+  choice.
+- **As a standing preference for the session** — the user says something like "always use Sonnet
+  minimum" or "don't delegate to Haiku today": treat that as the effective floor for every
+  delegation until they say otherwise, silently overriding what the rubric alone would have picked.
+
+Don't ask for confirmation before honoring an override — asking "are you sure, the rubric suggests
+a cheaper tier would work" defeats the point of giving the user control over their own cost/quality
+tradeoff.
+
+## Escalate when a tier fails the task
+
+Choosing a tier isn't a one-shot bet — if the result turns out inadequate for what the task
+actually needed, that's a signal to escalate, not to accept the result or silently retry the same
+tier again. This applies any time a chosen tier's output falls short, not only in the "I wasn't
+sure which tier to pick" case.
+
+**What counts as a failure worth escalating:**
+- The subagent reports it couldn't complete the task, or hit something beyond its judgment.
+- You check the output against the actual requirement (or the user does) and it's wrong, incomplete,
+  or missed something material — not just stylistically different from how you'd have done it.
+- The user says the result is wrong or insufficient.
+
+**How to escalate:**
+- Move exactly one tier up from what was used (Haiku → Sonnet → Opus → Fable) and re-run the
+  specific failed piece — not the whole batch if only one part failed.
+- State plainly what happened when you report back: which tier failed, why, and which tier you're
+  retrying on. This isn't a silent retry — the user should be able to see the escalation happened,
+  same as any other tier choice.
+- Fable is the ceiling — there's nothing to escalate to above it. If a Fable attempt is also
+  inadequate, that's a real blocker to surface to the user (the task may need a different approach
+  entirely, not just more model), not something to loop on.
+
+This is the other half of "default down when unsure" below: starting cheap only pays off if you
+actually notice and correct a bad result, rather than letting it stand because escalating feels
+like admitting the first choice was wrong. It wasn't wrong — starting cheap and escalating on
+evidence is the efficient strategy, not a fallback for a mistake.
 
 ## Quick reference
 
@@ -116,3 +164,5 @@ and correct, rather than one made silently on their behalf.
 | Deepest reasoning needed, or a documented cheaper-tier failure | Fable |
 | Unsure which tier | Start one cheaper, escalate only the failing piece |
 | Task fits an older generation you know is available | Prefer it over the newest generation of that tier |
+| Chosen tier's result is inadequate | Escalate exactly one tier up, state why, re-run only the failed piece |
+| User names a model or tier directly | Honor it immediately, no pushback, overrides the rubric |
