@@ -1,7 +1,7 @@
 {
   "name": "efficient-model-selection",
-  "description": "Standing guidance for picking the cheapest model tier that reliably does the job when delegating work to subagents or Workflow steps, reserving the most capable tier for genuinely hard reasoning. Also requires reporting which tier was used and why, honors direct user overrides immediately, and escalates one tier up when a chosen tier's result turns out inadequate.",
-  "version": "1.3.0",
+  "description": "Standing guidance for picking the cheapest model tier that reliably does the job when delegating work to subagents or Workflow steps, reserving the most capable tier for genuinely hard reasoning. Also reports why, honors overrides, escalates on failure, suggests (never forces) a main-conversation model change on a clear difficulty shift, and logs delegations to report savings on request.",
+  "version": "1.4.0",
   "author": {
     "name": "joeskolengaden"
   },

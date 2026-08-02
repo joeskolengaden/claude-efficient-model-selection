@@ -1,6 +1,6 @@
 ---
 name: efficient-model-selection
-description: Standing guidance for picking which model tier (Haiku, Sonnet, Opus, or Fable) to run a delegated task on — via the Agent tool's model parameter, a Workflow script's agent() calls, or any multi-step task with pieces of different difficulty. Consult this BEFORE spawning any subagent or authoring a Workflow, not just when the user says "efficiently" — it applies by default to every delegation, no exceptions. Reserves Fable for work needing deep, ambiguous, or high-stakes reasoning; defaults everything else to a cheaper tier. Also governs: reporting which tier was used and why every time delegated work is reported back; honoring a direct user override immediately; and escalating one tier up when a chosen tier's result turns out inadequate. Does not apply to the main conversation's own model, set via /model.
+description: Standing guidance for picking which model tier (Haiku, Sonnet, Opus, or Fable) to run a delegated task on — via the Agent tool's model parameter, a Workflow script's agent() calls, or any multi-step task with pieces of different difficulty. Consult this BEFORE spawning any subagent or authoring a Workflow, not just when the user says "efficiently" — it applies by default to every delegation, no exceptions. Reserves Fable for work needing deep, ambiguous, or high-stakes reasoning; defaults everything else to a cheaper tier. Also governs: reporting which tier was used and why every time; honoring a direct user override immediately; escalating one tier up on a bad result; suggesting a main-conversation model change on a clear difficulty shift (a question, never an automatic switch — no tool exists for that); and logging every delegation to report savings when asked.
 ---
 
 # Efficient model selection for delegated work
@@ -83,9 +83,9 @@ that greps logs and a stage that synthesizes a root-cause hypothesis from those 
 tasks with different tiers — don't let one `model` choice at the top of the script apply uniformly
 to both.
 
-**What this does NOT cover:** the main conversation's own model is the user's choice, set via
-`/model`. This skill governs delegation-time decisions only — the models you hand work *to*, not
-the model you're currently running as.
+**The main conversation's own model is still fundamentally the user's choice**, set via `/model` —
+there is no tool available to change it directly. But this skill does extend one advisory role
+into that territory: see "Suggesting a change to the main conversation's model" below.
 
 ## Older generations count too — tier isn't the only efficiency lever
 
@@ -168,6 +168,57 @@ This is the other half of "default down when unsure" below: starting cheap only 
 actually notice and correct a bad result, rather than letting it stand because escalating feels
 like admitting the first choice was wrong. It wasn't wrong — starting cheap and escalating on
 evidence is the efficient strategy, not a fallback for a mistake.
+
+## Suggesting a change to the main conversation's model
+
+You cannot switch the model you're currently running as — there's no tool for it. What you *can*
+do is notice when the task's character has clearly shifted from what your current model tier is
+well-suited for, and ask — a real question with a real answer, not a switch you make and announce.
+
+**When to say something:** only on a *clear* shift, not a gradual drift or a single harder-than-
+average message. Concretely:
+- The conversation was routine (simple Q&A, lookups, mechanical edits) and has now turned into a
+  genuine architecture/design decision, a debugging session with no clear root cause after initial
+  attempts, or synthesis across many conflicting considerations — worth asking about an upgrade.
+- The conversation was a hard, ambiguous task and has now settled into a long stretch of pure
+  mechanical follow-up (apply this exact pattern N times, rename these) — worth asking about a
+  downgrade, since that's real, ongoing cost with no quality benefit left to buy.
+
+**How to ask:** one line, state what changed and what you're suggesting, and let the user decide —
+e.g. "This has turned into a real architecture call rather than a quick lookup — want to switch to
+Opus for this part? (`/model opus`), or keep going on Sonnet?" Don't dress it up as a notification
+they have to dismiss; it's a question like any other, and "no" or silence is a complete answer.
+
+**Throttle it — this is the part that keeps it from becoming noise:**
+- At most once per genuine shift. If the user declines or doesn't respond, that's their answer for
+  *that* shift — don't re-ask the same suggestion again on the next message.
+- A new suggestion only fires on a *new*, different shift later in the conversation, not a repeat
+  of one already declined.
+- If you're not confident the shift is real and clear, say nothing rather than asking speculatively
+  — a wrong guess here costs more trust than a missed suggestion costs efficiency.
+
+## Track delegations, report savings
+
+Every delegated call's result carries a `<usage>` block with `subagent_tokens` (and often
+`tool_uses`, `duration_ms`). Log each one so savings are answerable later, not just felt anecdotally.
+
+**After each `Agent`/`Workflow` delegation**, append one line to
+`~/.claude/tools/model-selection-log.jsonl`:
+
+```json
+{"timestamp": "<ISO8601>", "tier": "haiku", "tokens": 28678, "task": "<one-line description>"}
+```
+
+Create the file and its parent directory if they don't exist yet; never overwrite, always append.
+
+**When asked how much this has saved:** read the log, and for each entry compute what the same
+token count would have cost at Opus's blended rate (the true no-skill default — absent this skill,
+the documented default behavior for delegated work is Opus, not the more expensive Fable, so Opus
+is the honest counterfactual, not the ceiling tier) versus what it actually cost at the tier used.
+Sum both across all entries and report the difference. State plainly that this is an estimate: the
+`<usage>` field is a single blended token count with no input/output split, so cost is computed
+from each tier's average of its input and output price, not exact per-token billing. Never present
+the number as more precise than that.
 
 ## Quick reference
 
