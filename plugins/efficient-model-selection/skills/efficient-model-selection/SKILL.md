@@ -250,9 +250,11 @@ other identifying field beyond these five without the user explicitly asking for
 field by name — this list is a ceiling, not a starting point to extend from "might be useful."
 
 The extractor creates the file and its parent directory if they don't exist yet, and only ever
-appends. It runs daily via a scheduled job, plus once immediately on login/restart specifically so
-a day missed while the machine was asleep or off gets caught up right away rather than silently
-skipped — see the install script in the skill's repo.
+appends. It runs hourly via a scheduled job (paired with the private-backup sync in one combined
+job, so extraction always finishes before sync reads the file), plus once immediately on
+login/restart specifically so a gap while the machine was asleep or off gets caught up right away
+rather than silently skipped — both steps are incremental, so a run after any length of gap just
+processes everything that piled up in one pass. See the install script in the skill's repo.
 
 **When asked how much this has saved:** read the log, and for each entry compute what the same
 token count would have cost at Opus's blended rate (the true no-skill default — absent this skill,

@@ -163,9 +163,9 @@ Claude log inline via a tool call, which meant paying token cost on every single
 to record that delegation; that's gone now.
 
 ```sh
-# One-time setup — runs the extractor daily, plus once on login/restart to catch up
-# any day the machine was asleep or off at the scheduled time:
-./model-selection-log-extract-install.sh
+# One-time setup — runs extraction then sync every hour, plus once immediately on
+# login/restart to catch up anything that piled up while the machine was asleep or off:
+./model-selection-hourly-update-install.sh
 
 # Read it anytime — this part was already zero-cost, unchanged:
 python3 model-selection-report.py              # overall summary
@@ -176,11 +176,17 @@ python3 model-selection-report.py --by-user     # + a breakdown per local userna
 python3 model-selection-report.py --by-project  # + a breakdown per project
 ```
 
+`model-selection-hourly-update.sh` runs extraction and the private-backup sync (below) as one
+combined job — extraction always finishes before sync reads the file, rather than two
+independently-scheduled jobs that could race or drift apart. Both steps are incremental, so a run
+after any length of gap (including the immediate one on login/restart) just processes everything
+that piled up since the last successful run, in one pass.
+
 **Multi-account safe by construction:** everything lives under `~/.claude/...`, so on a Mac with
-several macOS user accounts, each account's transcripts, log, and extraction job are already
+several macOS user accounts, each account's transcripts, log, and scheduled job are already
 isolated by the filesystem — there's no cross-account data path to worry about. The one thing that
-*isn't* automatic is the extraction job itself: launchd plists need literal paths baked in (no
-`$HOME` expansion), so `model-selection-log-extract-install.sh` generates one scoped to whichever
+*isn't* automatic is the job itself: launchd plists need literal paths baked in (no `$HOME`
+expansion), so `model-selection-hourly-update-install.sh` generates one scoped to whichever
 account runs it, rather than shipping a plist hardcoded to one person's home directory. Each
 account that wants this needs to run the install script once, under its own login.
 
@@ -200,12 +206,14 @@ file paths — without an explicit, specific ask naming the exact field. See the
 § "Track delegations, report savings" for the full reasoning, including why `utc_offset` was
 chosen over IP-based geolocation specifically.
 
-**Backing this data up:** if you want the log backed up somewhere off your machine, put it in its
-own **private** repo, separate from this one — this repo is the public, shareable skill; the log
-is personal usage data and shouldn't live alongside it. A small daily sync is enough: a script
-that copies `model-selection-log.jsonl` into a git-tracked directory and pushes if it changed,
-triggered once a day by a launchd job (macOS) or cron. Not included here since it's personal
-infrastructure, not part of the skill itself — a few lines of shell is all it takes.
+**Backing this data up:** `model-selection-hourly-update.sh` already calls a sync step after
+extraction — but the sync *target* is a personal, private repo, not this one, so setting that part
+up is on you. This repo is the public, shareable skill; the log is personal usage data and
+shouldn't live alongside it. The sync half is a small script: copy `model-selection-log.jsonl`
+into a git-tracked directory pointed at your own **private** GitHub repo, commit and push only
+when it changed (`git status --porcelain` on the copied file is enough to check). A few lines of
+shell — not included here since the private repo it pushes to is yours to create, not this repo's
+to assume.
 
 No dependencies beyond Python's standard library. Sample output:
 
@@ -244,7 +252,8 @@ plugins/efficient-model-selection/.claude-plugin/plugin.json                 plu
 plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md  the skill itself
 build.sh                                                                     rebuilds the .skill package
 model-selection-log-extract.py                                               zero-cost delegation logger — see Tracking savings
-model-selection-log-extract-install.sh                                      installs the daily extraction job for the current account
+model-selection-hourly-update.sh                                             runs extraction + private-backup sync, in that order
+model-selection-hourly-update-install.sh                                     installs the hourly job for the current account
 model-selection-report.py                                                    standalone savings report — see Tracking savings
 .github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
