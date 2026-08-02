@@ -40,6 +40,14 @@ Nothing to invoke, nothing to configure. It's a standing rule, not a command:
 - **Generation, not just tier:** where a specific model ID is settable (a `Workflow` script's
   `agent()` `opts.model`), it also prefers an older still-available generation over the newest one
   when the task doesn't need whatever the newest generation added.
+- **Suggests (never forces) a main-conversation model change:** there's no tool to switch the
+  model you're currently talking to — only `/model`, which you run yourself. If the task's
+  character clearly shifts mid-conversation (routine → real architecture/ambiguity, or the
+  reverse), Claude asks once, in one line, and doesn't repeat a suggestion you've already declined.
+- **Logs every delegation for savings reporting:** each `Agent`/`Workflow` call appends its tier
+  and token count to `~/.claude/tools/model-selection-log.jsonl`. Ask "how much has this saved?"
+  anytime, or run the standalone report script yourself — see [Tracking savings](#tracking-savings)
+  below.
 
 ## Install
 
@@ -144,6 +152,37 @@ on these probes than the "cheap tier" label might suggest. The escalation instru
 place and will fire the next time a chosen tier's output is genuinely inadequate; this round just
 didn't happen to produce one.
 
+## Tracking savings
+
+The delegation log at `~/.claude/tools/model-selection-log.jsonl` isn't session-scoped — it's a
+global file that keeps growing across every future session and project, since Claude appends to
+it on every delegation. That already gives you long-term tracking; the only gap is a way to read
+it without asking Claude each time. This repo ships one:
+
+```sh
+python3 model-selection-report.py              # overall summary
+python3 model-selection-report.py --by-day      # + a breakdown per day
+python3 model-selection-report.py --by-month    # + a breakdown per month
+```
+
+No dependencies beyond Python's standard library. Sample output:
+
+```
+=== Overall (10 delegations) ===
+  haiku      6 calls,   171,839 tokens
+  opus       2 calls,   101,126 tokens
+  sonnet     2 calls,    85,019 tokens
+  Actual cost:            $2.7976
+  Counterfactual (opus):  $5.3698
+  Estimated savings:      $2.5722  (47.9% reduction)
+```
+
+The counterfactual baseline is Opus, not Fable — Opus is the documented no-skill default for
+delegated work, so it's the honest comparison rather than the most flattering one. Cost is an
+estimate: each logged entry carries one blended token count with no input/output split, so it's
+priced at each tier's average of its input and output rate, not exact per-token billing. See the
+constants at the top of the script if pricing changes and you want to update the rates.
+
 ## Updating / uninstalling (CLI / IDE)
 
 ```
@@ -162,6 +201,7 @@ For the desktop app, re-download and re-upload the `.skill` file to update; remo
 plugins/efficient-model-selection/.claude-plugin/plugin.json                 plugin manifest
 plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md  the skill itself
 build.sh                                                                     rebuilds the .skill package
+model-selection-report.py                                                    standalone savings report — see Tracking savings
 .github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
 
