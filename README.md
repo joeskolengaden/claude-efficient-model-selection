@@ -163,7 +163,21 @@ it without asking Claude each time. This repo ships one:
 python3 model-selection-report.py              # overall summary
 python3 model-selection-report.py --by-day      # + a breakdown per day
 python3 model-selection-report.py --by-month    # + a breakdown per month
+python3 model-selection-report.py --by-host     # + a breakdown per machine (hostname)
+python3 model-selection-report.py --by-user     # + a breakdown per local username
 ```
+
+Each entry also carries `hostname`, `os`, and `username` — a deliberately bounded set for
+multi-machine/multi-user breakdowns, not a device fingerprint. No location, IP address, MAC
+address, or hardware identifiers, and none should be added without an explicit, specific ask —
+see the skill's `SKILL.md` § "Track delegations, report savings" for the reasoning.
+
+**Backing this data up:** if you want the log backed up somewhere off your machine, put it in its
+own **private** repo, separate from this one — this repo is the public, shareable skill; the log
+is personal usage data and shouldn't live alongside it. A small daily sync is enough: a script
+that copies `model-selection-log.jsonl` into a git-tracked directory and pushes if it changed,
+triggered once a day by a launchd job (macOS) or cron. Not included here since it's personal
+infrastructure, not part of the skill itself — a few lines of shell is all it takes.
 
 No dependencies beyond Python's standard library. Sample output:
 

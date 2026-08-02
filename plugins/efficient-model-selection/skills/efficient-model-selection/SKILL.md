@@ -206,8 +206,16 @@ Every delegated call's result carries a `<usage>` block with `subagent_tokens` (
 `~/.claude/tools/model-selection-log.jsonl`:
 
 ```json
-{"timestamp": "<ISO8601>", "tier": "haiku", "tokens": 28678, "task": "<one-line description>"}
+{"timestamp": "<ISO8601>", "tier": "haiku", "tokens": 28678, "task": "<one-line description>",
+ "hostname": "<platform.node()>", "os": "<platform.system()> <platform.release()>",
+ "username": "<getpass.getuser()>"}
 ```
+
+`hostname`/`os`/`username` are a deliberately bounded set — enough for a multi-machine or
+multi-user breakdown, not a device fingerprint. Do not add location, IP address, MAC address,
+hardware serial numbers, or any other identifying field beyond these three without the user
+explicitly asking for that specific field by name — this list is a ceiling, not a starting point
+to extend from "might be useful."
 
 Create the file and its parent directory if they don't exist yet; never overwrite, always append.
 

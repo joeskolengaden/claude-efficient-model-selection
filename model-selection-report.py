@@ -13,6 +13,11 @@ Usage:
     python3 model-selection-report.py            # full summary
     python3 model-selection-report.py --by-month  # also break down by month
     python3 model-selection-report.py --by-day    # also break down by day
+    python3 model-selection-report.py --by-host   # also break down by hostname
+    python3 model-selection-report.py --by-user   # also break down by username
+
+Entries logged before hostname/os/username were added won't have those fields — they're grouped
+under "(unknown)" in --by-host / --by-user output rather than dropped.
 """
 import json
 import sys
@@ -105,6 +110,20 @@ def main():
             by_day[day].append(e)
         for day in sorted(by_day):
             summarize(by_day[day], day)
+
+    if "--by-host" in sys.argv:
+        by_host = defaultdict(list)
+        for e in entries:
+            by_host[e.get("hostname", "(unknown)")].append(e)
+        for host in sorted(by_host):
+            summarize(by_host[host], f"host: {host}")
+
+    if "--by-user" in sys.argv:
+        by_user = defaultdict(list)
+        for e in entries:
+            by_user[e.get("username", "(unknown)")].append(e)
+        for user in sorted(by_user):
+            summarize(by_user[user], f"user: {user}")
 
 
 if __name__ == "__main__":
