@@ -199,11 +199,24 @@ they have to dismiss; it's a question like any other, and "no" or silence is a c
 
 ## Track delegations, report savings
 
-Every delegated call's result carries a `<usage>` block with `subagent_tokens` (and often
-`tool_uses`, `duration_ms`). Log each one so savings are answerable later, not just felt anecdotally.
+**This logging happens entirely outside the conversation — you do not append to it yourself.**
+Earlier versions of this skill had Claude append a log line via a tool call after every
+delegation; that meant an extra tool-call round trip (and its own token cost) on top of every
+single delegation, which is a real, avoidable cost for a skill whose whole point is spending less.
+Logging now happens via `model-selection-log-extract.py`, a standalone script (see the skill's
+GitHub repo) that reads delegation data directly out of Claude Code's own session transcripts on
+a schedule — zero AI/credit cost, since it's plain file parsing, the same way
+`model-selection-report.py` reads the log with zero cost. **Do not reintroduce inline logging** —
+if you notice this section asking you to run a Bash command after a delegation, that's stale
+guidance; the extractor is the source of truth now.
 
-**After each `Agent`/`Workflow` delegation**, append one line to
-`~/.claude/tools/model-selection-log.jsonl`:
+One real gap from this tradeoff: the extractor can't see *why* you escalated (that's a judgment
+call visible only in the conversation) — so `escalated_from` on auto-extracted entries is always
+`null`. If escalation frequency matters enough to track precisely, that would need to go back to
+inline logging for escalations specifically, at the cost this section exists to avoid; don't add
+that back without the user asking for it by name, same as any other field-scope decision here.
+
+The reference format each extracted entry takes:
 
 ```json
 {"timestamp": "<ISO8601>", "tier": "haiku", "tokens": 28678, "duration_ms": 8659, "tool_uses": 1,
@@ -236,7 +249,10 @@ fingerprint. Do not add IP address, MAC address, hardware serial numbers, full f
 other identifying field beyond these five without the user explicitly asking for that specific
 field by name — this list is a ceiling, not a starting point to extend from "might be useful."
 
-Create the file and its parent directory if they don't exist yet; never overwrite, always append.
+The extractor creates the file and its parent directory if they don't exist yet, and only ever
+appends. It runs daily via a scheduled job, plus once immediately on login/restart specifically so
+a day missed while the machine was asleep or off gets caught up right away rather than silently
+skipped — see the install script in the skill's repo.
 
 **When asked how much this has saved:** read the log, and for each entry compute what the same
 token count would have cost at Opus's blended rate (the true no-skill default — absent this skill,

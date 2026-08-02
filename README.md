@@ -155,11 +155,19 @@ didn't happen to produce one.
 ## Tracking savings
 
 The delegation log at `~/.claude/tools/model-selection-log.jsonl` isn't session-scoped — it's a
-global file that keeps growing across every future session and project, since Claude appends to
-it on every delegation. That already gives you long-term tracking; the only gap is a way to read
-it without asking Claude each time. This repo ships one:
+global file that keeps growing across every future session and project. Logging itself costs
+**zero AI credits**: `model-selection-log-extract.py` reads delegation data (tier, tokens,
+duration) directly out of Claude Code's own session transcripts on disk — plain file parsing, not
+an extra tool call Claude makes after every delegation. An earlier version of this skill did have
+Claude log inline via a tool call, which meant paying token cost on every single delegation just
+to record that delegation; that's gone now.
 
 ```sh
+# One-time setup — runs the extractor daily, plus once on login/restart to catch up
+# any day the machine was asleep or off at the scheduled time:
+./model-selection-log-extract-install.sh
+
+# Read it anytime — this part was already zero-cost, unchanged:
 python3 model-selection-report.py              # overall summary
 python3 model-selection-report.py --by-day      # + a breakdown per day
 python3 model-selection-report.py --by-month    # + a breakdown per month
@@ -167,6 +175,19 @@ python3 model-selection-report.py --by-host     # + a breakdown per machine (hos
 python3 model-selection-report.py --by-user     # + a breakdown per local username
 python3 model-selection-report.py --by-project  # + a breakdown per project
 ```
+
+**Multi-account safe by construction:** everything lives under `~/.claude/...`, so on a Mac with
+several macOS user accounts, each account's transcripts, log, and extraction job are already
+isolated by the filesystem — there's no cross-account data path to worry about. The one thing that
+*isn't* automatic is the extraction job itself: launchd plists need literal paths baked in (no
+`$HOME` expansion), so `model-selection-log-extract-install.sh` generates one scoped to whichever
+account runs it, rather than shipping a plist hardcoded to one person's home directory. Each
+account that wants this needs to run the install script once, under its own login.
+
+**Scope note:** the extractor currently covers foreground `Agent`-tool delegations
+(`run_in_background: false`) that explicitly set a model tier — everything this skill actually
+governs. Background `Agent` calls and `Workflow` `agent()` calls aren't covered yet; a delegation
+made that way won't appear in the log until the extractor is extended for those shapes.
 
 Each entry also carries `duration_ms`, `tool_uses`, and `escalated_from` (which tier failed
 first, if this was an escalation retry — see § "Escalate when a tier fails the task") — all read
@@ -222,6 +243,8 @@ For the desktop app, re-download and re-upload the `.skill` file to update; remo
 plugins/efficient-model-selection/.claude-plugin/plugin.json                 plugin manifest
 plugins/efficient-model-selection/skills/efficient-model-selection/SKILL.md  the skill itself
 build.sh                                                                     rebuilds the .skill package
+model-selection-log-extract.py                                               zero-cost delegation logger — see Tracking savings
+model-selection-log-extract-install.sh                                      installs the daily extraction job for the current account
 model-selection-report.py                                                    standalone savings report — see Tracking savings
 .github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
