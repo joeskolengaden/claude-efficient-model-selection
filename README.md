@@ -165,12 +165,19 @@ python3 model-selection-report.py --by-day      # + a breakdown per day
 python3 model-selection-report.py --by-month    # + a breakdown per month
 python3 model-selection-report.py --by-host     # + a breakdown per machine (hostname)
 python3 model-selection-report.py --by-user     # + a breakdown per local username
+python3 model-selection-report.py --by-project  # + a breakdown per project
 ```
 
-Each entry also carries `hostname`, `os`, and `username` — a deliberately bounded set for
-multi-machine/multi-user breakdowns, not a device fingerprint. No location, IP address, MAC
-address, or hardware identifiers, and none should be added without an explicit, specific ask —
-see the skill's `SKILL.md` § "Track delegations, report savings" for the reasoning.
+Each entry also carries `duration_ms`, `tool_uses`, and `escalated_from` (which tier failed
+first, if this was an escalation retry — see § "Escalate when a tier fails the task") — all read
+straight from the delegation's own result, no extra cost. Plus a deliberately bounded
+identity/context set: `hostname`, `os`, `username`, `project` (folder name only, never the full
+path), and `utc_offset` — a rough regional signal computed entirely from the local system clock,
+with no network call and no third-party IP lookup. None of this is a device fingerprint, and
+nothing further should be added — no full IP address, MAC address, hardware identifiers, or full
+file paths — without an explicit, specific ask naming the exact field. See the skill's `SKILL.md`
+§ "Track delegations, report savings" for the full reasoning, including why `utc_offset` was
+chosen over IP-based geolocation specifically.
 
 **Backing this data up:** if you want the log backed up somewhere off your machine, put it in its
 own **private** repo, separate from this one — this repo is the public, shareable skill; the log

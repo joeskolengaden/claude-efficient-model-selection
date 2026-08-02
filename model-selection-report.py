@@ -10,14 +10,16 @@ the documented no-skill default for delegated work, not the most expensive
 tier (Fable), so it's the honest comparison rather than the most flattering one.
 
 Usage:
-    python3 model-selection-report.py            # full summary
-    python3 model-selection-report.py --by-month  # also break down by month
-    python3 model-selection-report.py --by-day    # also break down by day
-    python3 model-selection-report.py --by-host   # also break down by hostname
-    python3 model-selection-report.py --by-user   # also break down by username
+    python3 model-selection-report.py             # full summary
+    python3 model-selection-report.py --by-month   # also break down by month
+    python3 model-selection-report.py --by-day     # also break down by day
+    python3 model-selection-report.py --by-host    # also break down by hostname
+    python3 model-selection-report.py --by-user    # also break down by username
+    python3 model-selection-report.py --by-project # also break down by project
 
-Entries logged before hostname/os/username were added won't have those fields — they're grouped
-under "(unknown)" in --by-host / --by-user output rather than dropped.
+Entries logged before a given field was added won't have it — they're grouped under "(unknown)"
+in the relevant --by-* output rather than dropped. Escalation count and average duration are
+shown per group whenever at least one entry in that group carries the relevant field.
 """
 import json
 import sys
@@ -66,6 +68,8 @@ def summarize(entries, label="Overall"):
     by_tier = defaultdict(lambda: {"count": 0, "tokens": 0})
     actual_total = 0.0
     counterfactual_total = 0.0
+    durations = []
+    escalations = 0
 
     for e in entries:
         tier = e.get("tier", "unknown")
@@ -74,6 +78,10 @@ def summarize(entries, label="Overall"):
         by_tier[tier]["tokens"] += tokens
         actual_total += cost(tokens, tier)
         counterfactual_total += cost(tokens, BASELINE_TIER)
+        if e.get("duration_ms") is not None:
+            durations.append(e["duration_ms"])
+        if e.get("escalated_from"):
+            escalations += 1
 
     print(f"\n=== {label} ({len(entries)} delegations) ===")
     for tier in sorted(by_tier):
@@ -85,6 +93,12 @@ def summarize(entries, label="Overall"):
         savings = counterfactual_total - actual_total
         pct = (1 - actual_total / counterfactual_total) * 100
         print(f"  Estimated savings:      ${savings:.4f}  ({pct:.1f}% reduction)")
+    if durations:
+        print(f"  Avg duration:           {sum(durations)/len(durations)/1000:.1f}s "
+              f"(over {len(durations)} entries with duration recorded)")
+    if escalations:
+        print(f"  Escalations:            {escalations} of {len(entries)} were retries after a "
+              f"cheaper tier failed")
 
 
 def main():
@@ -124,6 +138,13 @@ def main():
             by_user[e.get("username", "(unknown)")].append(e)
         for user in sorted(by_user):
             summarize(by_user[user], f"user: {user}")
+
+    if "--by-project" in sys.argv:
+        by_project = defaultdict(list)
+        for e in entries:
+            by_project[e.get("project", "(unknown)")].append(e)
+        for project in sorted(by_project):
+            summarize(by_project[project], f"project: {project}")
 
 
 if __name__ == "__main__":

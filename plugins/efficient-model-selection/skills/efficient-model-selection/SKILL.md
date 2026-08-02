@@ -206,16 +206,35 @@ Every delegated call's result carries a `<usage>` block with `subagent_tokens` (
 `~/.claude/tools/model-selection-log.jsonl`:
 
 ```json
-{"timestamp": "<ISO8601>", "tier": "haiku", "tokens": 28678, "task": "<one-line description>",
+{"timestamp": "<ISO8601>", "tier": "haiku", "tokens": 28678, "duration_ms": 8659, "tool_uses": 1,
+ "task": "<one-line description>", "escalated_from": null, "project": "<cwd folder name>",
  "hostname": "<platform.node()>", "os": "<platform.system()> <platform.release()>",
- "username": "<getpass.getuser()>"}
+ "username": "<getpass.getuser()>", "utc_offset": "<e.g. +05:30, from the local system clock>"}
 ```
 
-`hostname`/`os`/`username` are a deliberately bounded set — enough for a multi-machine or
-multi-user breakdown, not a device fingerprint. Do not add location, IP address, MAC address,
-hardware serial numbers, or any other identifying field beyond these three without the user
-explicitly asking for that specific field by name — this list is a ceiling, not a starting point
-to extend from "might be useful."
+Field notes:
+- `duration_ms` / `tool_uses`: read straight from the delegation's own `<usage>` block — no
+  extra work, they're already returned.
+- `escalated_from`: `null` on a normal delegation. When this entry is a retry after a cheaper
+  tier's result was inadequate (see "Escalate when a tier fails the task" above), set it to the
+  tier that failed — e.g. `"escalated_from": "haiku"` on the Sonnet retry. This is what makes
+  escalation frequency queryable later, not just visible in the moment it happens.
+- `project`: the current working directory's folder **name only** (`Path.cwd().name`), never the
+  full path — a full path can leak the username and personal folder structure through the log,
+  which is exactly the kind of incidental exposure the bounded-fields rule below exists to avoid.
+- `utc_offset`: the *only* location-adjacent field, and it's a specific, deliberate choice —
+  the local system clock's UTC offset (e.g. `+05:30`), computed entirely locally with no network
+  call. This is genuinely approximate (narrows down a broad region, nothing more) precisely
+  *because* it avoids the alternative: IP-based geolocation, which would mean sending the
+  device's public IP to a third-party lookup service on every delegation. Do not add IP-based or
+  any other more-precise location source without the user explicitly asking for that specific
+  mechanism, understanding it means a new external data flow, not just a new field.
+
+`hostname`/`os`/`username`/`project`/`utc_offset` are a deliberately bounded identity/context set
+— enough for a multi-machine, multi-user, multi-project, or rough-region breakdown, not a device
+fingerprint. Do not add IP address, MAC address, hardware serial numbers, full file paths, or any
+other identifying field beyond these five without the user explicitly asking for that specific
+field by name — this list is a ceiling, not a starting point to extend from "might be useful."
 
 Create the file and its parent directory if they don't exist yet; never overwrite, always append.
 
