@@ -17,6 +17,12 @@ Think of this as a ladder. Start by asking what the task *genuinely* requires, n
 "nice to have." A task doesn't earn a more expensive tier just because it's part of something
 important — an important task made of routine steps still runs its steps on cheap tiers.
 
+**The cost gap is real, not nominal.** Per-million-token pricing roughly doubles at each rung —
+Haiku (~$1 in / $5 out) → Sonnet (~$3 in / $15 out) → Opus (~$5 in / $25 out) → Fable (~$10 in /
+$50 out). Fable costs 10× Haiku on both input and output. Defaulting a routine task to the top
+tier isn't a rounding error — it's an order-of-magnitude overspend for zero quality gain on work
+that didn't need it. Exact prices drift over time; the ratios between tiers are the durable part.
+
 **Haiku — routine, mechanical, narrow-scope work.**
 The task has a clear procedure and a checkable outcome; there's little judgment to exercise.
 - Listing/finding files, grepping for a symbol, reading a known location
@@ -25,6 +31,10 @@ The task has a clear procedure and a checkable outcome; there's little judgment 
 - Straightforward verification passes (does X exist, does Y match, run this check and report pass/fail)
 - Benchmarking or timing runs where the "thinking" is in the harness, not the agent
 - Mechanical edits with fully-specified instructions (rename this, apply this exact diff pattern N times)
+- Note: Haiku's context window is smaller than the other three tiers' (roughly 200K vs. ~1M
+  tokens). A task that's otherwise Haiku-simple but needs to hold a very large amount of content
+  at once (a huge log file, a big multi-file read) may not fit — that's a reason to move up a
+  tier even though the *reasoning* difficulty didn't change.
 
 **Sonnet — moderate complexity, some synthesis or judgment required.**
 The task involves more than one step where the steps interact, or requires weighing a few options.
@@ -92,9 +102,14 @@ that reliably does the job, not the newest one available.
   at the tier a sub-task needs, prefer it over the newest generation of that tier when the task is
   well within what the older generation reliably handled — don't reach for the newest generation by
   default any more than you'd reach for a bigger tier by default.
+- **What a valid ID looks like:** `claude-<tier>-<generation>`, e.g. `claude-opus-4-8`,
+  `claude-sonnet-4-6` — no date suffix on most tiers. Haiku is the exception and does carry one,
+  e.g. `claude-haiku-4-5-20251001`. This is the *shape* to recognize, not a list to memorize —
+  which generation is current, older-but-still-active, or retired changes over time.
 - Don't guess at model ID strings you're not confident are valid — an unrecognized ID fails the call.
-  Only pin an older generation when you have it from context (the system prompt, or the user telling
-  you what's available); otherwise let the tier resolve to its current default.
+  Only pin an older generation when you have it confirmed from context (the system prompt, the user
+  telling you what's available, or a reference doc that states current IDs) — never from a guess
+  pattern-matched off the shape above. Otherwise let the tier resolve to its current default.
 
 ## Report the choice — and why — back to the user
 
