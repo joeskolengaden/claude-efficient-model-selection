@@ -159,19 +159,33 @@ paragraph — this is a tag alongside the result, not a justification essay. Do 
 every time, not only when asked.
 
 **Make it visually distinct, not just present.** A tier tag buried mid-paragraph is easy to miss —
-give it a consistent, recognizable spot instead. Chat replies here don't support true color or a
-different font (there's no rendering control for that), so the honest substitute is a **blockquote
-callout**, placed at the very start or the very end of a reply that involved delegated work — pick
-one position and stay consistent within a conversation rather than alternating. Format:
+give it a consistent, recognizable spot instead. Two tiers of implementation, in preference order:
+
+**Preferred, when a widget-rendering tool is available (e.g. `mcp__visualize__show_widget`):**
+render a compact row of tier badges — one per tier actually used this reply — each with a fixed,
+consistent color per tier (not cycled/rainbow; same tier = same color every time) and the tier
+name in a distinct font from body text (e.g. a serif/voice font token if the rendering surface
+provides one) alongside a ≤5-word reason. This is genuine visual distinction — real color, real
+font difference — not an approximation. Read that tool's own design-system guidance before first
+use in a session; don't guess at styling conventions. Keep the widget to the badges only — the
+explanation/reasoning stays in your normal response text, per that tool's own rule about not
+duplicating content between the two.
+
+**Fallback, when no such tool is available in the current surface** (plain-text-only CLI sessions,
+or the tool isn't accessible): a blockquote callout, since chat text alone has no color or font
+control:
 
 ```
 > 🎯 **Model selection:** ran on Haiku (mechanical file listing) · Sonnet (synthesis) · Opus (judgment call)
 ```
 
-One line per reply covering everything delegated in that turn, not one callout per delegation —
-if a reply involved several tiers, list them together in one callout, in the order they ran. If a
-reply involved no delegation at all, skip the callout entirely — it's a report on what happened,
-not a fixture that appears regardless.
+Either way: one callout per reply covering everything delegated in that turn, not one per
+delegation — if a reply involved several tiers, show them together, in the order they ran. Placed
+at the start or end of the reply, whichever position you pick consistently within a conversation.
+If a reply involved no delegation at all, skip it entirely — it's a report on what happened, not a
+fixture that appears regardless. Don't over-use the widget form for something this frequent if it
+turns out heavier than the moment calls for — if a user says it's too much, the blockquote is
+already the documented fallback, not a downgrade to invent on the spot.
 
 ## The user can always override
 
