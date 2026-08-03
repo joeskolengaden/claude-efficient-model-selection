@@ -92,7 +92,12 @@ def summarize(entries, label="Overall"):
     if counterfactual_total > 0:
         savings = counterfactual_total - actual_total
         pct = (1 - actual_total / counterfactual_total) * 100
+        # Token-equivalent: what the money saved would have bought at the baseline tier's rate —
+        # not a literal token-count difference, just the same dollar savings in a more intuitive unit.
+        token_equiv = int(savings / (BLENDED_RATE_PER_MTOK[BASELINE_TIER] / 1_000_000))
         print(f"  Estimated savings:      ${savings:.4f}  ({pct:.1f}% reduction)")
+        print(f"  Token-equivalent:       {token_equiv:,} {BASELINE_TIER} tokens "
+              f"(what the savings would buy at {BASELINE_TIER}'s rate)")
     if durations:
         print(f"  Avg duration:           {sum(durations)/len(durations)/1000:.1f}s "
               f"(over {len(durations)} entries with duration recorded)")

@@ -209,11 +209,23 @@ chosen over IP-based geolocation specifically.
 **Backing this data up:** `model-selection-hourly-update.sh` already calls a sync step after
 extraction — but the sync *target* is a personal, private repo, not this one, so setting that part
 up is on you. This repo is the public, shareable skill; the log is personal usage data and
-shouldn't live alongside it. The sync half is a small script: copy `model-selection-log.jsonl`
-into a git-tracked directory pointed at your own **private** GitHub repo, commit and push only
-when it changed (`git status --porcelain` on the copied file is enough to check). A few lines of
-shell — not included here since the private repo it pushes to is yours to create, not this repo's
-to assume.
+shouldn't live alongside it.
+
+`multi-contributor-sync-template/sync.sh` is a working reference for that sync step — point it at
+your own **private** GitHub repo (`git remote add origin <your-private-repo-url>` inside a fresh
+clone of it) and it's ready to use. It's **merge-safe, not overwrite-and-push**: if more than one
+person contributes to the same private repo, a plain copy-and-push would let one person's push
+silently clobber another's, or fail outright once two people push around the same time. This
+script instead pulls the latest remote state, takes the deduplicated union of (remote entries) +
+(your own local entries), and pushes — retrying the pull/merge/push cycle if someone else pushed
+in between. Validated with a real simulated-concurrent-push test, not just assumed to work.
+
+**A dashboard, if more than one person is contributing:** add a small GitHub Action to your
+private repo that regenerates a README section (overall stats, plus a per-contributor breakdown
+once there's more than one) on every push to the log — visible the moment anyone opens the repo,
+no separate hosting needed. GitHub Pages would be the more visual option, but it needs a paid plan
+to work on a private repo; a README table works on any plan. Not included here for the same reason
+as the sync script — it depends on the private repo's own structure, which is yours to set up.
 
 No dependencies beyond Python's standard library. Sample output:
 
@@ -225,6 +237,7 @@ No dependencies beyond Python's standard library. Sample output:
   Actual cost:            $2.7976
   Counterfactual (opus):  $5.3698
   Estimated savings:      $2.5722  (47.9% reduction)
+  Token-equivalent:       171,478 opus tokens (what the savings would buy at opus's rate)
 ```
 
 The counterfactual baseline is Opus, not Fable — Opus is the documented no-skill default for
@@ -255,6 +268,7 @@ model-selection-log-extract.py                                               zer
 model-selection-hourly-update.sh                                             runs extraction + private-backup sync, in that order
 model-selection-hourly-update-install.sh                                     installs the hourly job for the current account
 model-selection-report.py                                                    standalone savings report — see Tracking savings
+multi-contributor-sync-template/sync.sh                                      merge-safe sync reference for a shared private log repo
 .github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
 
