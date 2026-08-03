@@ -6,9 +6,29 @@ since this reads files already on disk instead of Claude making an extra tool ca
 delegation. Meant to run on a schedule (see the accompanying launchd plist), not interactively.
 
 Scope: Agent-tool delegations that explicitly set a model tier — both foreground
-(run_in_background: false) and background (the tool's own default). Workflow agent() calls aren't
-covered yet (a different transcript shape again); a delegation made that way won't appear until
-this is extended further.
+(run_in_background: false) and background (the tool's own default) — plus Workflow agent() calls.
+
+Workflow coverage works differently from the other two, because the data lives differently: a
+Workflow run's tool_result in the main transcript is just a "launched in background" pointer (like
+the Agent tool's background case), but unlike Agent, its completion is NOT signalled by a
+<task-notification> in the main transcript at all (confirmed empirically — a real Workflow run's
+task ID never appeared in a queued_command attachment, even long after the run had finished). So
+instead of watching for a completion signal, each run's own directory is polled directly:
+~/.claude/projects/<project>/<session-id>/subagents/workflows/<run-id>/journal.jsonl records one
+"started"/"result" pair per agent() call in the script, and — the part that makes this possible at
+all — a sibling agent-<agentId>.jsonl next to it is a REAL sub-transcript for that one call, with
+genuine assistant `message.model` and `message.usage` per turn (confirmed against a live file
+before writing this, not assumed). That's actually more granular than what's available for the
+Agent tool (a single combined subagent_tokens figure): here tokens are summed directly from each
+turn's usage block, and the model is the one that actually ran, not just the one requested.
+
+Two honest limitations, called out rather than glossed over: (1) duration_ms is approximated as
+last-turn-timestamp minus first-turn-timestamp within that sub-transcript, since no single duration
+field exists there — close but not identical to the wall-clock duration_ms reported elsewhere.
+(2) the tokens figure is a raw sum of input+output+cache_creation+cache_read across that call's
+turns, which is a different basis than the Agent tool's subagent_tokens field — comparable in
+magnitude, not guaranteed identical in formula. Both are noted here so nobody mistakes this for a
+higher-precision number than it is.
 
 Foreground calls resolve within one scan: the tool_use and its tool_result both land in the
 transcript back-to-back. Background calls don't — the launch and the completion notification can
@@ -33,6 +53,8 @@ every historical delegation from unrelated past work the first time it runs.
 State file (~/.claude/tools/model-selection-log-extract-state.json) tracks:
   - per-transcript byte offset, so repeat runs only scan new content
   - pending_background: tool_use_id -> launch details, for background calls awaiting completion
+  - workflow_journal_offsets: per-journal.jsonl byte offset, so repeat runs only scan new "result"
+    lines (mirrors file_offsets but kept separate since these live under a different glob)
   - last_run: ISO timestamp of the last successful run, for missed-day detection
 """
 import getpass
@@ -40,6 +62,7 @@ import json
 import platform
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 HOME = Path.home()
@@ -70,10 +93,16 @@ def load_state():
         try:
             state = json.loads(STATE_PATH.read_text())
             state.setdefault("pending_background", {})
+            state.setdefault("workflow_journal_offsets", {})
             return state
         except (json.JSONDecodeError, OSError):
             pass
-    return {"file_offsets": {}, "pending_background": {}, "last_run": None}
+    return {
+        "file_offsets": {},
+        "pending_background": {},
+        "workflow_journal_offsets": {},
+        "last_run": None,
+    }
 
 
 def save_state(state):
@@ -84,6 +113,24 @@ def all_transcript_files():
     if not PROJECTS_DIR.is_dir():
         return []
     return [p for p in PROJECTS_DIR.glob("*/*.jsonl")]
+
+
+def all_workflow_journal_files():
+    if not PROJECTS_DIR.is_dir():
+        return []
+    return [p for p in PROJECTS_DIR.glob("*/*/subagents/workflows/*/journal.jsonl")]
+
+
+def normalize_tier(model_id):
+    """Raw model IDs (e.g. "claude-opus-4-8", "claude-haiku-4-5-20251001") down to the same
+    tier names ("opus", "haiku", ...) used everywhere else in the log, so Workflow-sourced
+    entries aggregate correctly alongside Agent-tool ones. Falls back to the raw ID, unchanged,
+    for anything that doesn't match a known tier — better than guessing wrong."""
+    lowered = (model_id or "").lower()
+    for tier in ("opus", "sonnet", "haiku", "fable"):
+        if tier in lowered:
+            return tier
+    return model_id
 
 
 def utc_offset_str():
@@ -206,6 +253,120 @@ def extract_from_file(path, start_offset, pending_background):
     return new_offset, entries
 
 
+def _parse_ts(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _read_agent_subtranscript(agent_path):
+    """Returns (model, task, cwd, timestamp, tokens, tool_uses_count, duration_ms) for one
+    Workflow agent() call's sub-transcript, or None if the file is missing/unreadable/empty —
+    e.g. a "result" journal line written just before its sibling file was flushed to disk."""
+    if not agent_path.exists():
+        return None
+    model = None
+    task = None
+    cwd = None
+    first_ts = None
+    last_ts = None
+    tokens = 0
+    tool_uses_count = 0
+    try:
+        with open(agent_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = _parse_ts(d.get("timestamp"))
+                if ts:
+                    first_ts = ts if first_ts is None else min(first_ts, ts)
+                    last_ts = ts if last_ts is None else max(last_ts, ts)
+                if cwd is None and d.get("cwd"):
+                    cwd = d.get("cwd")
+                msg = d.get("message")
+                if not isinstance(msg, dict):
+                    continue
+                content = msg.get("content")
+                if d.get("type") == "user" and task is None:
+                    if isinstance(content, str):
+                        task = content
+                    elif isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                task = block.get("text", "")
+                                break
+                elif d.get("type") == "assistant":
+                    if model is None and msg.get("model"):
+                        model = msg["model"]
+                    usage = msg.get("usage")
+                    if isinstance(usage, dict):
+                        tokens += sum(
+                            usage.get(k, 0) or 0
+                            for k in (
+                                "input_tokens",
+                                "output_tokens",
+                                "cache_creation_input_tokens",
+                                "cache_read_input_tokens",
+                            )
+                        )
+                    if isinstance(content, list):
+                        tool_uses_count += sum(
+                            1 for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
+                        )
+    except OSError:
+        return None
+    if model is None:
+        return None
+    duration_ms = int((last_ts - first_ts).total_seconds() * 1000) if first_ts and last_ts else 0
+    timestamp = first_ts.isoformat() if first_ts else None
+    return normalize_tier(model), task, cwd, timestamp, tokens, tool_uses_count, duration_ms
+
+
+def extract_from_workflow_journal(journal_path, start_offset):
+    """Returns (new_end_offset, [entries]) for "result" lines appended to a Workflow run's
+    journal.jsonl since start_offset. Each result names an agentId; the actual model/usage data
+    is read from that agent's own sibling sub-transcript file, not the journal line itself."""
+    size = journal_path.stat().st_size
+    if size <= start_offset:
+        return size, []
+
+    with open(journal_path, "r", errors="replace") as f:
+        f.seek(start_offset)
+        chunk = f.read()
+    new_offset = start_offset + len(chunk.encode("utf-8", errors="replace"))
+
+    entries = []
+    for line in chunk.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if d.get("type") != "result":
+            continue
+        agent_id = d.get("agentId")
+        if not agent_id:
+            continue
+        agent_path = journal_path.parent / f"agent-{agent_id}.jsonl"
+        parsed = _read_agent_subtranscript(agent_path)
+        if parsed is None:
+            continue
+        model, task, cwd, timestamp, tokens, tool_uses_count, duration_ms = parsed
+        entries.append(make_entry(model, task, cwd, timestamp, tokens, tool_uses_count, duration_ms))
+
+    return new_offset, entries
+
+
 def main():
     state = load_state()
     offsets = state.setdefault("file_offsets", {})
@@ -226,6 +387,17 @@ def main():
             continue
         new_offset, entries = extract_from_file(path, offsets[key], pending_background)
         offsets[key] = new_offset
+        all_new_entries.extend(entries)
+
+    workflow_offsets = state["workflow_journal_offsets"]
+    for path in all_workflow_journal_files():
+        key = str(path)
+        if key not in workflow_offsets:
+            # same no-backfill policy as main transcripts: only watch from here forward
+            workflow_offsets[key] = path.stat().st_size
+            continue
+        new_offset, entries = extract_from_workflow_journal(path, workflow_offsets[key])
+        workflow_offsets[key] = new_offset
         all_new_entries.extend(entries)
 
     if all_new_entries:

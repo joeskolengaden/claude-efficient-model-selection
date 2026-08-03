@@ -291,7 +291,13 @@ The reference format each extracted entry takes:
 
 Field notes:
 - `duration_ms` / `tool_uses`: read straight from the delegation's own `<usage>` block — no
-  extra work, they're already returned.
+  extra work, they're already returned. Exception: `Workflow` `agent()` calls have no such block
+  (that tool doesn't surface one), so for those entries `duration_ms` is the span between that
+  call's first and last transcript timestamps (a close approximation, not identical to a true
+  wall-clock duration) and `tokens` is summed directly from each turn's usage rather than read
+  from a single combined figure — comparable in magnitude to Agent-tool entries, not guaranteed
+  identical in formula. Called out here so the numbers aren't mistaken for higher precision than
+  they are.
 - `escalated_from`: `null` on a normal delegation. When this entry is a retry after a cheaper
   tier's result was inadequate (see "Escalate when a tier fails the task" above), set it to the
   tier that failed — e.g. `"escalated_from": "haiku"` on the Sonnet retry. This is what makes
