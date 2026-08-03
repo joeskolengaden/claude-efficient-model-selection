@@ -190,10 +190,13 @@ expansion), so `model-selection-hourly-update-install.sh` generates one scoped t
 account runs it, rather than shipping a plist hardcoded to one person's home directory. Each
 account that wants this needs to run the install script once, under its own login.
 
-**Scope note:** the extractor currently covers foreground `Agent`-tool delegations
-(`run_in_background: false`) that explicitly set a model tier — everything this skill actually
-governs. Background `Agent` calls and `Workflow` `agent()` calls aren't covered yet; a delegation
-made that way won't appear in the log until the extractor is extended for those shapes.
+**Scope note:** the extractor covers both foreground and background `Agent`-tool delegations that
+explicitly set a model tier — background completions arrive as a separate transcript event
+(`type: "attachment"`, a `<task-notification>` block) that can land arbitrarily later than the
+launch, sometimes past a single scan's boundary, so a launched-but-not-yet-completed background
+call is tracked in the extractor's own state until its completion notification appears, even
+across separate runs. `Workflow` `agent()` calls use a different shape again and aren't covered
+yet; a delegation made that way won't appear in the log until the extractor is extended further.
 
 Each entry also carries `duration_ms`, `tool_uses`, and `escalated_from` (which tier failed
 first, if this was an escalation retry — see § "Escalate when a tier fails the task") — all read

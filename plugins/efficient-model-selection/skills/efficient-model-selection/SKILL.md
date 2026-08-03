@@ -158,6 +158,21 @@ the choice was reasonable; the reason is what makes it checkable. Keep it to a c
 paragraph — this is a tag alongside the result, not a justification essay. Do this by default,
 every time, not only when asked.
 
+**Make it visually distinct, not just present.** A tier tag buried mid-paragraph is easy to miss —
+give it a consistent, recognizable spot instead. Chat replies here don't support true color or a
+different font (there's no rendering control for that), so the honest substitute is a **blockquote
+callout**, placed at the very start or the very end of a reply that involved delegated work — pick
+one position and stay consistent within a conversation rather than alternating. Format:
+
+```
+> 🎯 **Model selection:** ran on Haiku (mechanical file listing) · Sonnet (synthesis) · Opus (judgment call)
+```
+
+One line per reply covering everything delegated in that turn, not one callout per delegation —
+if a reply involved several tiers, list them together in one callout, in the order they ran. If a
+reply involved no delegation at all, skip the callout entirely — it's a report on what happened,
+not a fixture that appears regardless.
+
 ## The user can always override
 
 A direct instruction about which model to use always wins, immediately, no pushback — this
