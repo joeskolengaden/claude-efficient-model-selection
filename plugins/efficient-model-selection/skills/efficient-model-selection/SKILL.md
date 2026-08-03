@@ -78,6 +78,18 @@ the rubric above. Omitting it inherits the session's main-loop model — do this
 actually want that (e.g. the task needs the exact capability level the user is currently running
 at), not as a default to avoid deciding.
 
+**`subagent_type` is a separate lever from tier, and it's about expertise fit, not cost.** Each
+specialized type (e.g. `Explore` for read-only search, `Plan` for architecture, `general-purpose`
+for broad work) has its own tuned default model, tool access, and effort in its own definition —
+picking the type that actually matches the task's *shape* (pure search vs. planning vs. open-ended
+work) is itself part of choosing efficiently, before you even get to the `model` override. Two
+implications:
+- When a specialized type clearly fits, prefer it over `general-purpose` — its defaults were tuned
+  for exactly that kind of work, which can already be more efficient than a manual tier guess.
+- Only override that type's default `model` when you have a specific reason (the rubric above
+  points to a different tier than its default) — don't override reflexively just because you're
+  in the habit of always setting `model` explicitly.
+
 **In a `Workflow` script:** set `opts.model` on each `agent()` call individually. A pipeline stage
 that greps logs and a stage that synthesizes a root-cause hypothesis from those logs are different
 tasks with different tiers — don't let one `model` choice at the top of the script apply uniformly
@@ -110,6 +122,29 @@ that reliably does the job, not the newest one available.
   Only pin an older generation when you have it confirmed from context (the system prompt, the user
   telling you what's available, or a reference doc that states current IDs) — never from a guess
   pattern-matched off the shape above. Otherwise let the tier resolve to its current default.
+
+## Task-specific fit, beyond raw difficulty
+
+Difficulty (the four tiers above) is the primary axis, but not the only one. A few other factors
+that can shift the choice even when difficulty alone points elsewhere:
+
+- **Vision-heavy work.** Higher tiers generally carry meaningfully higher-resolution image
+  support than lower tiers of the same generation — if a task leans on reading dense screenshots,
+  charts, or fine visual detail, that can be a reason to move up a tier even when the *reasoning*
+  involved is otherwise routine. Check current capabilities before assuming a specific number —
+  this changes across generations.
+- **Long-horizon, highly autonomous work.** Tasks meant to run for a long stretch with minimal
+  check-ins (not just "hard," but specifically *long and self-directed*) are where the top tier's
+  extra capability tends to earn its cost most clearly — this is a different signal from ambiguity
+  or stakes alone, and worth weighing alongside them, not instead of them.
+- **Effort/speed controls:** some Claude surfaces expose a separate effort or speed parameter
+  (independent of tier) for tuning depth-vs-cost within a single model. As of this writing, neither
+  the `Agent` tool nor `Workflow`'s `agent()` expose one — only `model` (tier, or a specific ID via
+  `Workflow`). Don't assume such a parameter exists on a call just because it exists elsewhere;
+  check the actual tool schema before relying on it, and don't invent a parameter name.
+
+None of this replaces the core rubric — it's additional signal for the genuinely close calls, not
+a reason to second-guess an otherwise-clear tier choice.
 
 ## Report the choice — and why — back to the user
 
@@ -277,3 +312,5 @@ the number as more precise than that.
 | Task fits an older generation you know is available | Prefer it over the newest generation of that tier |
 | Chosen tier's result is inadequate | Escalate exactly one tier up, state why, re-run only the failed piece |
 | User names a model or tier directly | Honor it immediately, no pushback, overrides the rubric |
+| A specialized `subagent_type` clearly fits (search, planning, etc.) | Prefer it over `general-purpose`; only override its default `model` for a specific reason |
+| Task is vision-heavy or meant to run long and highly autonomously | Weigh alongside difficulty, not instead of it — can justify a higher tier even if reasoning alone wouldn't |
