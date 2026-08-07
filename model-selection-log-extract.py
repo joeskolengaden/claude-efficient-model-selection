@@ -187,6 +187,10 @@ def extract_from_file(path, start_offset, pending_background):
             attachment = d.get("attachment")
             if isinstance(attachment, dict) and attachment.get("type") == "queued_command":
                 notif_text = attachment.get("prompt", "")
+                if not isinstance(notif_text, str):
+                    # queued_command attachments aren't always task-notification text — e.g. a
+                    # queued user message carrying an image has prompt as a content-block list
+                    continue
                 nm = TASK_NOTIFICATION_RE.search(notif_text)
                 if nm:
                     tool_use_id, status = nm.group(1).strip(), nm.group(2).strip()
