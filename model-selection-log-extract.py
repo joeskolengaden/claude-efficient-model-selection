@@ -215,7 +215,7 @@ def extract_from_file(path, start_offset, pending_background):
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_use" and block.get("name") == "Agent":
-                inp = block.get("input", {})
+                inp = block.get("input") or {}  # "input" can be present-but-null, not just missing
                 if not inp.get("model"):
                     continue
                 launch = {
@@ -258,7 +258,7 @@ def extract_from_file(path, start_offset, pending_background):
 
 
 def _parse_ts(ts):
-    if not ts:
+    if not isinstance(ts, str):
         return None
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
