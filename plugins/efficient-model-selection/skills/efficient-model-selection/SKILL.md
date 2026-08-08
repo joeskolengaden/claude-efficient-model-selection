@@ -187,6 +187,40 @@ fixture that appears regardless. Don't over-use the widget form for something th
 turns out heavier than the moment calls for — if a user says it's too much, the blockquote is
 already the documented fallback, not a downgrade to invent on the spot.
 
+## Make it deterministic: enforcement hooks (recommended)
+
+Everything above this point is advisory — it only takes effect if the acting Claude in a given
+session notices a delegation is coming and chooses to consult this skill. That is not a
+hypothetical gap: measured across 51 real sessions on the machine this was built on, that happened
+in 2 of them (4%) — one of those was the skill's own creation/self-test session, not an
+independent trigger. The other 49 sessions delegated work with no tier considered at all, silently
+inheriting whatever the main model happened to be.
+
+The fix is a Claude Code hook — code the harness itself runs before/after a tool call, not
+something Claude has to remember to do:
+
+- **`PreToolUse` on `Agent`**: blocks any call with no `model` field set. The block's own denial
+  reason carries the actual Haiku/Sonnet/Opus/Fable rubric inline, so the guidance reaches context
+  by being forced into the block text itself — not by hoping the model goes and reads this file
+  first. Setting `model` to the current model explicitly (a deliberate inherit) still passes.
+- **`PreToolUse` on `Workflow`**: best-effort text check — blocks a script that calls `agent()`
+  anywhere but sets `opts.model` nowhere in the whole script. This cannot verify per-call coverage
+  (some calls tiered, others not slips through); it only catches total omission.
+- **`PostToolUse` on both**: after a delegation completes, injects a reminder to report the tier
+  and reason back to the user visibly, per "Report the choice" above.
+
+Install with `~/.claude/tools/model-selection-hook-install.sh` (or its `.py` counterpart directly)
+— safe to re-run, merges into `~/.claude/settings.json` without touching unrelated settings, and
+reports rather than silently overwrites if you've already got a different hook on the same
+event/matcher. This is user-level config, so once installed it applies to every project, not just
+one.
+
+**Honest limit, not fixed by this**: a hook can force a *block* deterministically — that part is
+airtight, live-tested repeatedly. It cannot force the *shape* of Claude's final reply. The
+`PostToolUse` reminder is a strong, repeated nudge toward the visible tier report above, not a
+guarantee the badge or blockquote actually appears. If you notice tier reporting slipping even with
+the hook installed, that's the part still riding on the model following through, not a hook bug.
+
 ## The user can always override
 
 A direct instruction about which model to use always wins, immediately, no pushback — this

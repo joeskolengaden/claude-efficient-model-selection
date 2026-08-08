@@ -18,7 +18,10 @@ Full guidance: [`plugins/efficient-model-selection/skills/efficient-model-select
 
 ## What it actually does, once installed
 
-Nothing to invoke, nothing to configure. It's a standing rule, not a command:
+Nothing to invoke, nothing to configure by default. It's a standing rule, not a command — though
+see [Deterministic enforcement](#deterministic-enforcement-recommended) below for an optional
+install step that makes the two enforceable parts of this actually enforced, rather than relying
+on the model remembering to consult it:
 
 - **Selection:** before Claude spawns a subagent or writes a `Workflow` step, it consults this
   skill's four-tier rubric and picks the cheapest tier that genuinely fits the task, splitting
@@ -129,6 +132,33 @@ Then upload the resulting `efficient-model-selection.skill` as in step 2 above.
 - **Desktop app:** it appears in **Settings → Customize → Skills**, alongside any built-in ones.
 - **Either way:** delegate something and check the report — you should see a tier named (e.g. "ran
   on Haiku") alongside the result. If you never see that, the skill isn't loaded.
+
+## Deterministic enforcement (recommended)
+
+Everything above is advisory by default — Claude Code shows every session a one-line description
+of this skill, and it's up to the model in that session to notice a delegation is coming and
+choose to read the full rubric. Measured across 51 real sessions on the machine this was built on,
+that happened in 2 (4%) — one of those was the skill's own creation/self-test session. The other
+49 sessions delegated work with no tier considered at all.
+
+`model-selection-hook-install.sh` closes that gap with Claude Code hooks — code the harness itself
+runs, not something Claude has to remember:
+
+```sh
+./model-selection-hook-install.sh
+```
+
+- Blocks any `Agent` call with no `model` set — and the block's own denial reason carries the full
+  tier rubric inline, so the guidance is forced into context by the block itself, not by hoping the
+  model goes and reads the skill first.
+- Best-effort blocks a `Workflow` script that calls `agent()` but sets `opts.model` nowhere in the
+  whole script (can't verify partial coverage, only total omission).
+- After a delegation completes, injects a reminder to report the tier back to the user visibly.
+
+Installs into `~/.claude/settings.json` (user-level, so it covers every project), safe to re-run,
+and reports rather than overwrites if you've already got a different hook on the same
+event/matcher. **Honest limit:** the block is deterministic; the visible-reporting reminder is a
+strong nudge, not a guarantee — no hook can force the exact shape of Claude's reply.
 
 ## Why this exists
 
@@ -276,6 +306,8 @@ model-selection-log-extract.py                                               zer
 model-selection-hourly-update.sh                                             runs extraction + private-backup sync, in that order
 model-selection-hourly-update-install.sh                                     installs the hourly job for the current account
 model-selection-report.py                                                    standalone savings report — see Tracking savings
+model-selection-hook-install.sh                                              installs the enforcement hooks — see Deterministic enforcement
+model-selection-hook-install.py                                              the actual hook merge logic, called by the .sh wrapper
 multi-contributor-sync-template/sync.sh                                      merge-safe sync reference for a shared private log repo
 .github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
