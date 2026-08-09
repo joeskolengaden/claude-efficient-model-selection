@@ -154,11 +154,18 @@ runs, not something Claude has to remember:
 - Best-effort blocks a `Workflow` script that calls `agent()` but sets `opts.model` nowhere in the
   whole script (can't verify partial coverage, only total omission).
 - After a delegation completes, injects a reminder to report the tier back to the user visibly.
+- On a substantial or multi-part incoming prompt (word count ≥ 40, or 2+ newlines, or a numbered
+  list — thresholds checked against real captured prompts, not picked blind), nudges Claude to
+  consider delegating any independent/routine piece of it — while explicitly saying not to
+  delegate tightly-coupled, sequential, or stateful work. Confirmed silent on short, single-step
+  prompts using real messages from other sessions, so it doesn't fire on exactly the kind of terse
+  troubleshooting turn that shouldn't be nudged.
 
 Installs into `~/.claude/settings.json` (user-level, so it covers every project), safe to re-run,
 and reports rather than overwrites if you've already got a different hook on the same
-event/matcher. **Honest limit:** the block is deterministic; the visible-reporting reminder is a
-strong nudge, not a guarantee — no hook can force the exact shape of Claude's reply.
+event/matcher. **Honest limit:** the block is deterministic; the reminders are strong nudges, not
+guarantees — no hook can force the exact shape of Claude's reply, or force a delegation decision
+that never becomes a tool call in the first place.
 
 ## Why this exists
 

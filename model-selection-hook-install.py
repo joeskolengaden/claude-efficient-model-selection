@@ -5,7 +5,7 @@ Installs the efficient-model-selection enforcement hooks into ~/.claude/settings
 Why this exists: the skill's guidance is advisory by default — Claude Code shows every session a
 one-line description of the skill and leaves it to the model to notice a delegation is coming and
 choose to go read the full rubric. Measured against 51 real sessions on the machine this was built
-on, that happened twice (4%). These hooks make the two enforceable parts of the skill actually
+on, that happened twice (4%). These hooks make the enforceable parts of the skill actually
 enforced, deterministically, instead of depending on the model remembering:
 
   - PreToolUse on Agent/Workflow: blocks a delegation that has no model tier set at all, and the
@@ -15,16 +15,23 @@ enforced, deterministically, instead of depending on the model remembering:
   - PostToolUse on Agent/Workflow: after a delegation completes, injects a reminder to report the
     tier and reason back to the user visibly (colored badge via a widget tool if available, else a
     blockquote callout).
+  - UserPromptSubmit: on a substantial or multi-part incoming prompt (word count >= 40, or 2+
+    newlines, or a numbered list — checked against real captured prompts before shipping, not
+    guessed), injects a reminder to consider delegating any independent/routine piece of it, while
+    explicitly telling Claude NOT to delegate tightly-coupled, sequential, or stateful work. Stays
+    silent on short or single-step prompts — checked against real recent messages from other
+    sessions ("is the local host still running?", "do the recomendations") to confirm it doesn't
+    fire on exactly the kind of terse, sequential-debugging turns that shouldn't be nudged.
 
 Honest limit, unchanged by this script: a hook can force a *block* deterministically, but it cannot
-force the *shape* of Claude's final reply — the PostToolUse reminder is a strong nudge, not a
-guarantee the badge appears. See the skill's SKILL.md, "Report the choice" section.
+force the *shape* of Claude's final reply, nor force an actual delegation decision — all three
+reminders are strong nudges, not guarantees. See the skill's SKILL.md, "Report the choice" section.
 
-Safe to re-run: each of the four hook entries is matched by its (event, matcher) pair. If an
-identical entry is already installed, it's left alone. If a *different* hook is already installed
-on the same (event, matcher) — something else you added yourself — this script does NOT overwrite
-it; it reports the conflict and leaves your settings file untouched for that entry, so you can
-merge it by hand.
+Safe to re-run: each hook entry is matched by its (event, matcher) pair — UserPromptSubmit has no
+matcher (no tool to match against), so it's keyed on event alone. If an identical entry is already
+installed, it's left alone. If a *different* hook is already installed on the same (event,
+matcher) — something else you added yourself — this script does NOT overwrite it; it reports the
+conflict and leaves your settings file untouched for that entry, so you can merge it by hand.
 """
 import json
 import sys
@@ -63,6 +70,13 @@ WORKFLOW_POST_CONTEXT = (
     "available, else a blockquote callout - as part of your reply. Do this every time, not only "
     "if asked."
 )
+PROMPT_SUBMIT_CONTEXT = (
+    "efficient-model-selection: this looks like a substantial or multi-part request. Before "
+    "diving in, briefly consider whether any independent, routine, or mechanical piece of it "
+    "could be delegated to a subagent via Agent (with an explicit model tier per the rubric). Do "
+    "not delegate tightly-coupled, stateful, or interactive work - live debugging, edit-test-"
+    "restart loops, or anything where each step depends on the last result stays in the main loop."
+)
 
 
 def jq_pre_command(if_clause, reason):
@@ -85,6 +99,19 @@ def jq_post_command(context):
     )
 
 
+def jq_prompt_submit_command(context):
+    # Fires only on a substantial/multi-part prompt: word count >= 40, or 2+ newlines, or a
+    # numbered list. Stays silent (bare {}) otherwise — validated against real captured prompts
+    # from other sessions before shipping, not just synthetic cases.
+    return (
+        'jq \'if (((.prompt // "") | split(" ") | length) >= 40) or '
+        '(((.prompt // "") | [scan("\\n")] | length) >= 2) or '
+        '((.prompt // "") | test("(^|\\n)\\\\s*[0-9]+[.)]")) then '
+        '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: '
+        '"' + context.replace('"', '\\"') + '"}} else {} end\''
+    )
+
+
 DESIRED = {
     ("PreToolUse", "Agent"): jq_pre_command('((.tool_input.model // "") == "")', AGENT_PRE_REASON),
     ("PreToolUse", "Workflow"): jq_pre_command(
@@ -94,6 +121,7 @@ DESIRED = {
     ),
     ("PostToolUse", "Agent"): jq_post_command(AGENT_POST_CONTEXT),
     ("PostToolUse", "Workflow"): jq_post_command(WORKFLOW_POST_CONTEXT),
+    ("UserPromptSubmit", None): jq_prompt_submit_command(PROMPT_SUBMIT_CONTEXT),
 }
 
 
@@ -110,19 +138,23 @@ def main():
     installed, skipped_identical, conflicts = [], [], []
 
     for (event, matcher), command in DESIRED.items():
+        label = event if matcher is None else f"{event}/{matcher}"
         entries = hooks.setdefault(event, [])
         existing = next((e for e in entries if e.get("matcher") == matcher), None)
 
         if existing is None:
-            entries.append({"matcher": matcher, "hooks": [{"type": "command", "command": command}]})
-            installed.append(f"{event}/{matcher}")
+            new_entry = {"hooks": [{"type": "command", "command": command}]}
+            if matcher is not None:
+                new_entry = {"matcher": matcher, **new_entry}
+            entries.append(new_entry)
+            installed.append(label)
             continue
 
         existing_commands = [h.get("command") for h in existing.get("hooks", []) if h.get("type") == "command"]
         if existing_commands == [command]:
-            skipped_identical.append(f"{event}/{matcher}")
+            skipped_identical.append(label)
         else:
-            conflicts.append(f"{event}/{matcher}")
+            conflicts.append(label)
 
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(settings, indent=2))

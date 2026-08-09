@@ -208,6 +208,16 @@ something Claude has to remember to do:
   (some calls tiered, others not slips through); it only catches total omission.
 - **`PostToolUse` on both**: after a delegation completes, injects a reminder to report the tier
   and reason back to the user visibly, per "Report the choice" above.
+- **`UserPromptSubmit`**: the three hooks above only have anything to act on once a delegation is
+  already being attempted — they have no say over whether to delegate at all. This one nudges that
+  earlier decision, but narrowly: it fires only on a substantial or multi-part incoming prompt
+  (word count ≥ 40, or 2+ newlines, or a numbered list — thresholds checked against real captured
+  prompts before shipping, not picked blind), injecting a reminder to consider delegating any
+  independent/routine piece of it. It explicitly also says NOT to delegate tightly-coupled,
+  sequential, or stateful work — live debugging, an edit-test-restart loop, anything where each
+  step depends on the last result. Confirmed silent on short or single-step prompts using real
+  recent messages from other sessions ("is the local host still running?", "do the
+  recomendations") — the exact kind of terse, sequential-debugging turn this must not nudge.
 
 Install with `~/.claude/tools/model-selection-hook-install.sh` (or its `.py` counterpart directly)
 — safe to re-run, merges into `~/.claude/settings.json` without touching unrelated settings, and
@@ -216,10 +226,13 @@ event/matcher. This is user-level config, so once installed it applies to every 
 one.
 
 **Honest limit, not fixed by this**: a hook can force a *block* deterministically — that part is
-airtight, live-tested repeatedly. It cannot force the *shape* of Claude's final reply. The
+airtight, live-tested repeatedly. It cannot force the *shape* of Claude's final reply, and it
+cannot force a delegation decision that never happens as a tool call in the first place. The
 `PostToolUse` reminder is a strong, repeated nudge toward the visible tier report above, not a
-guarantee the badge or blockquote actually appears. If you notice tier reporting slipping even with
-the hook installed, that's the part still riding on the model following through, not a hook bug.
+guarantee the badge or blockquote actually appears; the `UserPromptSubmit` reminder is the same
+kind of nudge one step earlier, toward considering delegation at all. If you notice tier reporting
+or delegation itself slipping even with the hooks installed, that's the part still riding on the
+model following through, not a hook bug.
 
 ## The user can always override
 
