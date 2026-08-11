@@ -148,11 +148,13 @@ runs, not something Claude has to remember:
 ./model-selection-hook-install.sh
 ```
 
-- Blocks any `Agent` call with no `model` set — and the block's own denial reason carries the full
-  tier rubric inline, so the guidance is forced into context by the block itself, not by hoping the
-  model goes and reads the skill first.
+- Blocks any `Agent` call with no `model` set — the denial reason instructs calling the `Skill`
+  tool before retrying with an explicit tier. (An earlier version embedded the rubric directly in
+  the block instead, which set tiers correctly but meant the skill's own trigger count stayed near
+  zero even while working — this trades one extra tool call per untiered delegation for actual
+  visibility into whether the system is doing anything.)
 - Best-effort blocks a `Workflow` script that calls `agent()` but sets `opts.model` nowhere in the
-  whole script (can't verify partial coverage, only total omission).
+  whole script (can't verify partial coverage, only total omission), same call-Skill-first denial.
 - After a delegation completes, injects a reminder to report the tier back to the user visibly.
 - On a substantial or multi-part incoming prompt (word count ≥ 40, or 2+ newlines, or a numbered
   list — thresholds checked against real captured prompts, not picked blind), nudges Claude to

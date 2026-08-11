@@ -9,9 +9,14 @@ on, that happened twice (4%). These hooks make the enforceable parts of the skil
 enforced, deterministically, instead of depending on the model remembering:
 
   - PreToolUse on Agent/Workflow: blocks a delegation that has no model tier set at all, and the
-    block's own reason text carries the full Haiku/Sonnet/Opus/Fable rubric — so the guidance
-    reaches context by being forced into the block, not by hoping the model goes and reads the
-    skill first.
+    block's own reason text instructs Claude to call the Skill tool (efficient-model-selection)
+    before retrying. An earlier version of this hook embedded the rubric directly in the block
+    text instead, so the tier could be set correctly without ever invoking the skill — cheaper
+    per-delegation (no extra round-trip), but it meant the skill's actual usage/trigger count
+    stayed near zero even while working correctly, which undercut visibility into whether the
+    system was doing anything at all. This version trades a small per-delegation cost (one extra
+    tool call) for that visibility, by design choice, not because the embedded-rubric version was
+    broken.
   - PostToolUse on Agent/Workflow: after a delegation completes, injects a reminder to report the
     tier and reason back to the user visibly (colored badge via a widget tool if available, else a
     blockquote callout).
@@ -24,8 +29,11 @@ enforced, deterministically, instead of depending on the model remembering:
     fire on exactly the kind of terse, sequential-debugging turns that shouldn't be nudged.
 
 Honest limit, unchanged by this script: a hook can force a *block* deterministically, but it cannot
-force the *shape* of Claude's final reply, nor force an actual delegation decision — all three
-reminders are strong nudges, not guarantees. See the skill's SKILL.md, "Report the choice" section.
+force which specific action Claude takes next — the retry instruction can't literally compel a
+Skill call any more than the removed embedded rubric could compel the reporting reminder to be
+followed. Claude could still set a tier from memory instead of calling Skill. What the block *can*
+do deterministically is refuse a tier-less call outright, every time. See the skill's SKILL.md,
+"Report the choice" section, and "Make it deterministic" for the full picture.
 
 Safe to re-run: each hook entry is matched by its (event, matcher) pair — UserPromptSubmit has no
 matcher (no tool to match against), so it's keyed on event alone. If an identical entry is already
@@ -40,21 +48,17 @@ from pathlib import Path
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
 AGENT_PRE_REASON = (
-    "No model tier set. Pick one now: HAIKU = routine/mechanical/checkable, little judgment "
-    "(listing, grepping, fetch+summarize, mechanical edits). SONNET = multi-step work needing "
-    "synthesis/judgment across a few things, or default when unsure. OPUS = real ambiguity, "
-    "conflicting inputs, costly if wrong. FABLE = reserve for the deepest reasoning or a "
-    "documented cheaper-tier failure only. Set model to haiku/sonnet/opus/fable (or explicitly to "
-    "the current model only if deliberately inheriting it, never as a default) and retry. When "
-    "this delegation completes, report the tier and a short reason to the user in a visually "
-    "distinct way (a colored badge via a widget tool if available, else a blockquote callout) - "
-    "every time, not only if asked."
+    "No model tier set. Call the Skill tool now with skill: efficient-model-selection to load "
+    "the full tier rubric, then retry this call with an explicit model (haiku/sonnet/opus/fable, "
+    "or the current model only if deliberately inheriting it, never as a default). When this "
+    "delegation completes, report the tier and a short reason to the user in a visually distinct "
+    "way (a colored badge via a widget tool if available, else a blockquote callout) - every "
+    "time, not only if asked."
 )
 WORKFLOW_PRE_REASON = (
-    "This Workflow script calls agent() but sets opts.model nowhere. Rubric: HAIKU = "
-    "routine/mechanical/checkable. SONNET = multi-step synthesis, default when unsure. OPUS = "
-    "real ambiguity, costly if wrong. FABLE = reserve only. Set opts.model on each agent() call "
-    "using this rubric and retry. (Best-effort check: total omission only, not per-call "
+    "This Workflow script calls agent() but sets opts.model nowhere. Call the Skill tool now "
+    "with skill: efficient-model-selection to load the full tier rubric, then set opts.model on "
+    "each agent() call and retry. (Best-effort check: total omission only, not per-call "
     "coverage.) Report the tier and a short reason for each delegation to the user in a visually "
     "distinct way when this completes - every time, not only if asked."
 )
@@ -112,16 +116,49 @@ def jq_prompt_submit_command(context):
     )
 
 
+AGENT_PRE_IF_CLAUSE = '((.tool_input.model // "") == "")'
+WORKFLOW_PRE_IF_CLAUSE = (
+    '((.tool_input.script // "") | test("agent\\\\(")) and '
+    '((.tool_input.script // "") | test("model\\\\s*:") | not)'
+)
+
 DESIRED = {
-    ("PreToolUse", "Agent"): jq_pre_command('((.tool_input.model // "") == "")', AGENT_PRE_REASON),
-    ("PreToolUse", "Workflow"): jq_pre_command(
-        '((.tool_input.script // "") | test("agent\\\\(")) and '
-        '((.tool_input.script // "") | test("model\\\\s*:") | not)',
-        WORKFLOW_PRE_REASON,
-    ),
+    ("PreToolUse", "Agent"): jq_pre_command(AGENT_PRE_IF_CLAUSE, AGENT_PRE_REASON),
+    ("PreToolUse", "Workflow"): jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, WORKFLOW_PRE_REASON),
     ("PostToolUse", "Agent"): jq_post_command(AGENT_POST_CONTEXT),
     ("PostToolUse", "Workflow"): jq_post_command(WORKFLOW_POST_CONTEXT),
     ("UserPromptSubmit", None): jq_prompt_submit_command(PROMPT_SUBMIT_CONTEXT),
+}
+
+# Prior reason texts this script has shipped for the two PreToolUse hooks, kept only so an
+# in-place upgrade can tell "an older version of MY OWN hook" apart from a genuinely foreign hook
+# someone else added on the same event/matcher — the former is safe to silently replace, the
+# latter must never be silently overwritten. v1 embedded the rubric directly in the block text
+# (cheaper per-delegation, but meant Skill was almost never actually invoked); v2 (current)
+# instructs Claude to call Skill first instead, trading a small per-delegation cost for actual
+# trigger visibility.
+_AGENT_PRE_REASON_V1 = (
+    "No model tier set. Pick one now: HAIKU = routine/mechanical/checkable, little judgment "
+    "(listing, grepping, fetch+summarize, mechanical edits). SONNET = multi-step work needing "
+    "synthesis/judgment across a few things, or default when unsure. OPUS = real ambiguity, "
+    "conflicting inputs, costly if wrong. FABLE = reserve for the deepest reasoning or a "
+    "documented cheaper-tier failure only. Set model to haiku/sonnet/opus/fable (or explicitly to "
+    "the current model only if deliberately inheriting it, never as a default) and retry. When "
+    "this delegation completes, report the tier and a short reason to the user in a visually "
+    "distinct way (a colored badge via a widget tool if available, else a blockquote callout) - "
+    "every time, not only if asked."
+)
+_WORKFLOW_PRE_REASON_V1 = (
+    "This Workflow script calls agent() but sets opts.model nowhere. Rubric: HAIKU = "
+    "routine/mechanical/checkable. SONNET = multi-step synthesis, default when unsure. OPUS = "
+    "real ambiguity, costly if wrong. FABLE = reserve only. Set opts.model on each agent() call "
+    "using this rubric and retry. (Best-effort check: total omission only, not per-call "
+    "coverage.) Report the tier and a short reason for each delegation to the user in a visually "
+    "distinct way when this completes - every time, not only if asked."
+)
+KNOWN_PRIOR_COMMANDS = {
+    ("PreToolUse", "Agent"): [jq_pre_command(AGENT_PRE_IF_CLAUSE, _AGENT_PRE_REASON_V1)],
+    ("PreToolUse", "Workflow"): [jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, _WORKFLOW_PRE_REASON_V1)],
 }
 
 
@@ -135,7 +172,7 @@ def main():
     settings = load_settings()
     hooks = settings.setdefault("hooks", {})
 
-    installed, skipped_identical, conflicts = [], [], []
+    installed, skipped_identical, upgraded, conflicts = [], [], [], []
 
     for (event, matcher), command in DESIRED.items():
         label = event if matcher is None else f"{event}/{matcher}"
@@ -151,8 +188,12 @@ def main():
             continue
 
         existing_commands = [h.get("command") for h in existing.get("hooks", []) if h.get("type") == "command"]
+        prior_versions = KNOWN_PRIOR_COMMANDS.get((event, matcher), [])
         if existing_commands == [command]:
             skipped_identical.append(label)
+        elif len(existing_commands) == 1 and existing_commands[0] in prior_versions:
+            existing["hooks"] = [{"type": "command", "command": command}]
+            upgraded.append(label)
         else:
             conflicts.append(label)
 
@@ -164,6 +205,8 @@ def main():
 
     if installed:
         print(f"Installed: {', '.join(installed)}")
+    if upgraded:
+        print(f"Upgraded from a prior version of this hook: {', '.join(upgraded)}")
     if skipped_identical:
         print(f"Already installed, unchanged: {', '.join(skipped_identical)}")
     if conflicts:

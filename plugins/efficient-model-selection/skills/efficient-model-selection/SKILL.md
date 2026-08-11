@@ -199,13 +199,18 @@ inheriting whatever the main model happened to be.
 The fix is a Claude Code hook — code the harness itself runs before/after a tool call, not
 something Claude has to remember to do:
 
-- **`PreToolUse` on `Agent`**: blocks any call with no `model` field set. The block's own denial
-  reason carries the actual Haiku/Sonnet/Opus/Fable rubric inline, so the guidance reaches context
-  by being forced into the block text itself — not by hoping the model goes and reads this file
-  first. Setting `model` to the current model explicitly (a deliberate inherit) still passes.
+- **`PreToolUse` on `Agent`**: blocks any call with no `model` field set. The block's denial reason
+  instructs calling the `Skill` tool (`efficient-model-selection`) before retrying with an explicit
+  tier. An earlier version of this hook embedded the rubric directly in the block text instead —
+  cheaper per-delegation (no extra round-trip), but it meant the tier could be set correctly
+  without the skill ever actually being invoked, so the skill's own trigger count stayed near zero
+  even while the system worked. This version trades one extra tool call per untiered delegation for
+  that visibility, by deliberate choice — not because the embedded-rubric version was broken.
+  Setting `model` to the current model explicitly (a deliberate inherit) still passes either way.
 - **`PreToolUse` on `Workflow`**: best-effort text check — blocks a script that calls `agent()`
-  anywhere but sets `opts.model` nowhere in the whole script. This cannot verify per-call coverage
-  (some calls tiered, others not slips through); it only catches total omission.
+  anywhere but sets `opts.model` nowhere in the whole script, with the same call-Skill-first
+  instruction. This cannot verify per-call coverage (some calls tiered, others not slips through);
+  it only catches total omission.
 - **`PostToolUse` on both**: after a delegation completes, injects a reminder to report the tier
   and reason back to the user visibly, per "Report the choice" above.
 - **`UserPromptSubmit`**: the three hooks above only have anything to act on once a delegation is
