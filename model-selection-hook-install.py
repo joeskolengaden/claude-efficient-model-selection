@@ -17,9 +17,16 @@ enforced, deterministically, instead of depending on the model remembering:
     system was doing anything at all. This version trades a small per-delegation cost (one extra
     tool call) for that visibility, by design choice, not because the embedded-rubric version was
     broken.
-  - PostToolUse on Agent/Workflow: after a delegation completes, injects a reminder to report the
-    tier and reason back to the user visibly (colored badge via a widget tool if available, else a
-    blockquote callout).
+  - PostToolUse on Agent/Workflow: after a delegation completes, (1) injects a reminder to report
+    the tier and reason back to the user visibly (colored badge via a widget tool if available,
+    else a blockquote callout), and (2) triggers model-selection-hourly-update.sh in the
+    background (async, non-blocking) so the private GitHub log stays close to real-time instead of
+    waiting up to an hour for the scheduled job. That script now holds a simple mkdir-based lock
+    (flock isn't available on macOS by default) so a burst of parallel delegations — which this
+    skill's own rubric explicitly encourages splitting work into — collapses into one effective
+    sync instead of several processes racing on the same state file: whichever fires first runs
+    normally, any other already-in-flight trigger exits immediately, and the hourly job remains as
+    a backstop either way, so nothing is ever lost, only deferred by a few seconds at most.
   - UserPromptSubmit: on a substantial or multi-part incoming prompt (word count >= 40, or 2+
     newlines, or a numbered list — checked against real captured prompts before shipping, not
     guessed), injects a reminder to consider delegating any independent/routine piece of it, while
@@ -81,6 +88,7 @@ PROMPT_SUBMIT_CONTEXT = (
     "not delegate tightly-coupled, stateful, or interactive work - live debugging, edit-test-"
     "restart loops, or anything where each step depends on the last result stays in the main loop."
 )
+SYNC_TRIGGER_COMMAND = '"$HOME/.claude/tools/model-selection-hourly-update.sh"'
 
 
 def jq_pre_command(if_clause, reason):
@@ -116,18 +124,35 @@ def jq_prompt_submit_command(context):
     )
 
 
+def cmd_hook(command, async_=False):
+    h = {"type": "command", "command": command}
+    if async_:
+        h["async"] = True
+    return h
+
+
 AGENT_PRE_IF_CLAUSE = '((.tool_input.model // "") == "")'
 WORKFLOW_PRE_IF_CLAUSE = (
     '((.tool_input.script // "") | test("agent\\\\(")) and '
     '((.tool_input.script // "") | test("model\\\\s*:") | not)'
 )
 
+# Each entry is the *list* of hook dicts that should run, in order, for that (event, matcher).
+# PostToolUse/Agent and PostToolUse/Workflow each carry two: the reporting reminder (unchanged
+# since it first shipped) plus the new real-time sync trigger, run async so it never adds latency
+# to the delegation itself.
 DESIRED = {
-    ("PreToolUse", "Agent"): jq_pre_command(AGENT_PRE_IF_CLAUSE, AGENT_PRE_REASON),
-    ("PreToolUse", "Workflow"): jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, WORKFLOW_PRE_REASON),
-    ("PostToolUse", "Agent"): jq_post_command(AGENT_POST_CONTEXT),
-    ("PostToolUse", "Workflow"): jq_post_command(WORKFLOW_POST_CONTEXT),
-    ("UserPromptSubmit", None): jq_prompt_submit_command(PROMPT_SUBMIT_CONTEXT),
+    ("PreToolUse", "Agent"): [cmd_hook(jq_pre_command(AGENT_PRE_IF_CLAUSE, AGENT_PRE_REASON))],
+    ("PreToolUse", "Workflow"): [cmd_hook(jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, WORKFLOW_PRE_REASON))],
+    ("PostToolUse", "Agent"): [
+        cmd_hook(jq_post_command(AGENT_POST_CONTEXT)),
+        cmd_hook(SYNC_TRIGGER_COMMAND, async_=True),
+    ],
+    ("PostToolUse", "Workflow"): [
+        cmd_hook(jq_post_command(WORKFLOW_POST_CONTEXT)),
+        cmd_hook(SYNC_TRIGGER_COMMAND, async_=True),
+    ],
+    ("UserPromptSubmit", None): [cmd_hook(jq_prompt_submit_command(PROMPT_SUBMIT_CONTEXT))],
 }
 
 # Prior reason texts this script has shipped for the two PreToolUse hooks, kept only so an
@@ -156,9 +181,21 @@ _WORKFLOW_PRE_REASON_V1 = (
     "coverage.) Report the tier and a short reason for each delegation to the user in a visually "
     "distinct way when this completes - every time, not only if asked."
 )
-KNOWN_PRIOR_COMMANDS = {
-    ("PreToolUse", "Agent"): [jq_pre_command(AGENT_PRE_IF_CLAUSE, _AGENT_PRE_REASON_V1)],
-    ("PreToolUse", "Workflow"): [jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, _WORKFLOW_PRE_REASON_V1)],
+KNOWN_PRIOR_HOOK_LISTS = {
+    ("PreToolUse", "Agent"): [
+        [cmd_hook(jq_pre_command(AGENT_PRE_IF_CLAUSE, _AGENT_PRE_REASON_V1))],
+    ],
+    ("PreToolUse", "Workflow"): [
+        [cmd_hook(jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, _WORKFLOW_PRE_REASON_V1))],
+    ],
+    # v1 of the PostToolUse hooks shipped with only the reporting reminder, before the real-time
+    # sync trigger was added — recognized here so that upgrade is also silent and automatic.
+    ("PostToolUse", "Agent"): [
+        [cmd_hook(jq_post_command(AGENT_POST_CONTEXT))],
+    ],
+    ("PostToolUse", "Workflow"): [
+        [cmd_hook(jq_post_command(WORKFLOW_POST_CONTEXT))],
+    ],
 }
 
 
@@ -174,25 +211,25 @@ def main():
 
     installed, skipped_identical, upgraded, conflicts = [], [], [], []
 
-    for (event, matcher), command in DESIRED.items():
+    for (event, matcher), desired_hooks in DESIRED.items():
         label = event if matcher is None else f"{event}/{matcher}"
         entries = hooks.setdefault(event, [])
         existing = next((e for e in entries if e.get("matcher") == matcher), None)
 
         if existing is None:
-            new_entry = {"hooks": [{"type": "command", "command": command}]}
+            new_entry = {"hooks": desired_hooks}
             if matcher is not None:
                 new_entry = {"matcher": matcher, **new_entry}
             entries.append(new_entry)
             installed.append(label)
             continue
 
-        existing_commands = [h.get("command") for h in existing.get("hooks", []) if h.get("type") == "command"]
-        prior_versions = KNOWN_PRIOR_COMMANDS.get((event, matcher), [])
-        if existing_commands == [command]:
+        existing_hooks = existing.get("hooks", [])
+        prior_versions = KNOWN_PRIOR_HOOK_LISTS.get((event, matcher), [])
+        if existing_hooks == desired_hooks:
             skipped_identical.append(label)
-        elif len(existing_commands) == 1 and existing_commands[0] in prior_versions:
-            existing["hooks"] = [{"type": "command", "command": command}]
+        elif existing_hooks in prior_versions:
+            existing["hooks"] = desired_hooks
             upgraded.append(label)
         else:
             conflicts.append(label)

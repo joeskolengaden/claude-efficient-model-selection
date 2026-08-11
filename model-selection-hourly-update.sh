@@ -3,15 +3,28 @@
 # that order — combined into one job so extraction always completes before sync reads the file,
 # rather than two independently-scheduled jobs that could race or drift apart over time.
 #
-# Triggered hourly, plus once immediately on login/restart (RunAtLoad in the plist) so a period
-# the machine was asleep or off gets caught up right away instead of silently skipped — both
-# steps are already incremental/idempotent (the extractor only reads new transcript content since
-# its last run; the sync script only commits+pushes when the file actually changed), so running
-# this after an arbitrarily long gap just processes everything that piled up in one pass.
+# Triggered hourly (launchd), plus once immediately on login/restart (RunAtLoad in the plist), AND
+# once after every single Agent/Workflow delegation (a PostToolUse hook — see
+# model-selection-hook-install.py) so the GitHub log stays close to real-time instead of waiting
+# up to an hour. That last trigger point is why the lock below exists: parallel delegations in one
+# turn each fire their own PostToolUse event, which would otherwise mean several copies of this
+# script racing on the same state file and log — one process's "new content since offset X" read
+# could double-count another's, since the extractor's own offset bookkeeping isn't itself safe
+# against concurrent writers. The lock makes concurrent triggers collapse into one effective run
+# rather than corrupt anything: whichever process gets here first runs normally; any other
+# already-in-flight process exits immediately, since the data it would have synced is already on
+# disk in the transcript and will be picked up by the run that's currently in progress, or by the
+# hourly job as a backstop either way — nothing is lost, just deferred a few seconds at most.
 set -euo pipefail
 
 TOOLS_DIR="$HOME/.claude/tools"
 LOG="$TOOLS_DIR/model-selection-hourly-update.log"
+LOCKDIR="$TOOLS_DIR/.model-selection-hourly-update.lock"
+
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    exit 0
+fi
+trap 'rmdir "$LOCKDIR"' EXIT
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
 

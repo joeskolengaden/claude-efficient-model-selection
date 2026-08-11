@@ -212,7 +212,9 @@ something Claude has to remember to do:
   instruction. This cannot verify per-call coverage (some calls tiered, others not slips through);
   it only catches total omission.
 - **`PostToolUse` on both**: after a delegation completes, injects a reminder to report the tier
-  and reason back to the user visibly, per "Report the choice" above.
+  and reason back to the user visibly, per "Report the choice" above — and, in the same slot,
+  triggers the delegation-log sync in the background so the GitHub log updates within seconds
+  instead of waiting for the hourly job, per "Track delegations, report savings" below.
 - **`UserPromptSubmit`**: the three hooks above only have anything to act on once a delegation is
   already being attempted — they have no say over whether to delegate at all. This one nudges that
   earlier decision, but narrowly: it fires only on a substantial or multi-part incoming prompt
@@ -375,8 +377,17 @@ The extractor creates the file and its parent directory if they don't exist yet,
 appends. It runs hourly via a scheduled job (paired with the private-backup sync in one combined
 job, so extraction always finishes before sync reads the file), plus once immediately on
 login/restart specifically so a gap while the machine was asleep or off gets caught up right away
-rather than silently skipped — both steps are incremental, so a run after any length of gap just
-processes everything that piled up in one pass. See the install script in the skill's repo.
+rather than silently skipped, plus once after every single `Agent`/`Workflow` delegation (a
+`PostToolUse` hook, alongside the visible-reporting reminder in the same slot) so the private
+GitHub log stays close to real-time instead of waiting up to an hour — live-tested end to end:
+a delegation's own entry showed up in the GitHub repo within seconds, no manual step. That
+per-delegation trigger runs async (never adds latency to the delegation itself) and the shared
+script now holds a simple lock, since a burst of parallel delegations — which this skill's own
+rubric explicitly encourages — would otherwise mean several copies racing on the same state file.
+Whichever fires first runs normally; anything already in flight exits immediately, and the hourly
+job stays as a backstop either way, so nothing is lost, only deferred a few seconds at most. All
+three trigger points are incremental, so a run after any gap just processes everything that piled
+up in one pass. See the install script in the skill's repo.
 
 **When asked how much this has saved:** read the log, and for each entry compute what the same
 token count would have cost at Opus's blended rate (the true no-skill default — absent this skill,

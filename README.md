@@ -155,7 +155,8 @@ runs, not something Claude has to remember:
   visibility into whether the system is doing anything.)
 - Best-effort blocks a `Workflow` script that calls `agent()` but sets `opts.model` nowhere in the
   whole script (can't verify partial coverage, only total omission), same call-Skill-first denial.
-- After a delegation completes, injects a reminder to report the tier back to the user visibly.
+- After a delegation completes, injects a reminder to report the tier back to the user visibly,
+  and triggers the delegation log's GitHub sync in the background — see Tracking savings below.
 - On a substantial or multi-part incoming prompt (word count ≥ 40, or 2+ newlines, or a numbered
   list — thresholds checked against real captured prompts, not picked blind), nudges Claude to
   consider delegating any independent/routine piece of it — while explicitly saying not to
@@ -203,8 +204,11 @@ to record that delegation; that's gone now.
 
 ```sh
 # One-time setup — runs extraction then sync every hour, plus once immediately on
-# login/restart to catch up anything that piled up while the machine was asleep or off:
+# login/restart to catch up anything that piled up while the machine was asleep or off,
+# plus once after every single Agent/Workflow delegation (see model-selection-hook-install.sh
+# below) so the GitHub log updates within seconds instead of waiting for the hourly job:
 ./model-selection-hourly-update-install.sh
+./model-selection-hook-install.sh
 
 # Read it anytime — this part was already zero-cost, unchanged:
 python3 model-selection-report.py              # overall summary
@@ -219,7 +223,13 @@ python3 model-selection-report.py --by-project  # + a breakdown per project
 combined job — extraction always finishes before sync reads the file, rather than two
 independently-scheduled jobs that could race or drift apart. Both steps are incremental, so a run
 after any length of gap (including the immediate one on login/restart) just processes everything
-that piled up since the last successful run, in one pass.
+that piled up since the last successful run, in one pass. The `PostToolUse` hook triggers this
+same script asynchronously after every delegation — live-tested end to end, a delegation's own log
+entry reached the GitHub repo within seconds. The script holds a simple mkdir-based lock (`flock`
+isn't available on macOS by default) so a burst of parallel delegations — which this skill's own
+rubric explicitly encourages — collapses into one effective run instead of racing on the shared
+state file: whichever trigger fires first runs normally, anything already in flight exits
+immediately, and the hourly job remains as a backstop either way.
 
 **Multi-account safe by construction:** everything lives under `~/.claude/...`, so on a Mac with
 several macOS user accounts, each account's transcripts, log, and scheduled job are already
