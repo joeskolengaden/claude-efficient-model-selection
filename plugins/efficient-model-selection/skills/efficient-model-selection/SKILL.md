@@ -225,6 +225,14 @@ something Claude has to remember to do:
   step depends on the last result. Confirmed silent on short or single-step prompts using real
   recent messages from other sessions ("is the local host still running?", "do the
   recomendations") — the exact kind of terse, sequential-debugging turn this must not nudge.
+- **`SubagentStop`**: closes a real gap `PostToolUse` alone leaves. A background delegation
+  (`run_in_background: true`, the default) fires `PostToolUse` at *launch*, not real completion —
+  the actual result arrives later via a task-notification, which never fires `PostToolUse` at all.
+  `SubagentStop` fires at true completion instead (confirmed empirically with a temporary inert
+  diagnostic hook first, not guessed), so it also triggers the log sync — live-tested with a real
+  background delegation, its entry reached GitHub seconds after completion. May fire redundantly
+  alongside `PostToolUse` for foreground delegations; harmless, the sync script's lock collapses
+  redundant triggers into one run.
 
 Install with `~/.claude/tools/model-selection-hook-install.sh` (or its `.py` counterpart directly)
 — safe to re-run, merges into `~/.claude/settings.json` without touching unrelated settings, and
@@ -385,9 +393,20 @@ per-delegation trigger runs async (never adds latency to the delegation itself) 
 script now holds a simple lock, since a burst of parallel delegations — which this skill's own
 rubric explicitly encourages — would otherwise mean several copies racing on the same state file.
 Whichever fires first runs normally; anything already in flight exits immediately, and the hourly
-job stays as a backstop either way, so nothing is lost, only deferred a few seconds at most. All
-three trigger points are incremental, so a run after any gap just processes everything that piled
-up in one pass. See the install script in the skill's repo.
+job stays as a backstop either way, so nothing is lost, only deferred a few seconds at most.
+
+**`PostToolUse` alone leaves a real gap, closed by a fourth trigger point.** `run_in_background:
+true` (the `Agent` tool's default) means the tool_result that fires `PostToolUse` arrives at
+*launch* time ("started in background"), not real completion — the actual result shows up later
+via a task-notification, which is not a tool_result and never fires `PostToolUse` at all. Confirmed
+empirically with a temporary inert diagnostic hook before relying on it, not guessed: `SubagentStop`
+fires at real completion, its `last_assistant_message` matching the eventual task-notification
+result exactly. So `SubagentStop` also triggers the same sync — live-tested with a real background
+delegation, its entry reached GitHub seconds after the completion notification arrived. It may also
+fire redundantly alongside `PostToolUse` for foreground delegations; harmless, the lock collapses
+redundant triggers into one effective run. All four trigger points are incremental, so a run after
+any gap just processes everything that piled up in one pass. See the install script in the skill's
+repo.
 
 **When asked how much this has saved:** read the log, and for each entry compute what the same
 token count would have cost at Opus's blended rate (the true no-skill default — absent this skill,

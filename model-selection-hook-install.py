@@ -34,6 +34,15 @@ enforced, deterministically, instead of depending on the model remembering:
     silent on short or single-step prompts — checked against real recent messages from other
     sessions ("is the local host still running?", "do the recomendations") to confirm it doesn't
     fire on exactly the kind of terse, sequential-debugging turns that shouldn't be nudged.
+  - SubagentStop: also triggers the same async sync as PostToolUse/Agent, added because
+    PostToolUse alone leaves a real gap. `run_in_background: true` (the Agent tool's default) means
+    the tool_result that fires PostToolUse arrives at LAUNCH time ("started in background"), not
+    real completion — the actual result shows up later via a task-notification, which is not a
+    tool_result and never fires PostToolUse at all. Confirmed empirically with a temporary inert
+    diagnostic hook (not guessed): SubagentStop fires at real completion, its
+    last_assistant_message matching the eventual task-notification result exactly. It may also
+    fire redundantly alongside PostToolUse for foreground delegations — harmless, the shared
+    script's lock collapses redundant triggers into one effective run.
 
 Honest limit, unchanged by this script: a hook can force a *block* deterministically, but it cannot
 force which specific action Claude takes next — the retry instruction can't literally compel a
@@ -153,6 +162,7 @@ DESIRED = {
         cmd_hook(SYNC_TRIGGER_COMMAND, async_=True),
     ],
     ("UserPromptSubmit", None): [cmd_hook(jq_prompt_submit_command(PROMPT_SUBMIT_CONTEXT))],
+    ("SubagentStop", None): [cmd_hook(SYNC_TRIGGER_COMMAND, async_=True)],
 }
 
 # Prior reason texts this script has shipped for the two PreToolUse hooks, kept only so an

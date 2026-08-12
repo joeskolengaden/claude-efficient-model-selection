@@ -163,6 +163,12 @@ runs, not something Claude has to remember:
   delegate tightly-coupled, sequential, or stateful work. Confirmed silent on short, single-step
   prompts using real messages from other sessions, so it doesn't fire on exactly the kind of terse
   troubleshooting turn that shouldn't be nudged.
+- Also triggers the sync on `SubagentStop`, closing a real gap the `PostToolUse` trigger alone
+  leaves: a background delegation (`run_in_background: true`, the `Agent` tool's default) fires
+  `PostToolUse` at launch, not real completion — the actual result arrives later via a task-
+  notification, which never fires `PostToolUse`. `SubagentStop` fires at true completion instead
+  (confirmed with a temporary diagnostic hook before relying on it, not guessed) — live-tested with
+  a real background delegation, its entry reached GitHub seconds after completion.
 
 Installs into `~/.claude/settings.json` (user-level, so it covers every project), safe to re-run,
 and reports rather than overwrites if you've already got a different hook on the same
