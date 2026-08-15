@@ -1,0 +1,46 @@
+name: Update dashboard
+
+# Regenerates the README's dashboard section whenever the log changes, AND on a schedule
+# independent of that — the rolling-window table (Last 1 hour / 24 hours / etc.) is computed
+# relative to generation time, so it goes stale during any quiet period with no new delegations:
+# without the schedule trigger, "Last 1 hour" would keep showing whatever was true as of the last
+# push, not what's true right now. The scheduled run re-checks out the repo fresh each time, so it
+# reflects the real current time even when nothing new landed. Runs on GitHub's infrastructure, not
+# dependent on any local machine being on or awake. Guards against an infinite loop (this
+# workflow's own push commit would otherwise re-trigger itself) by skipping when the pusher is the
+# workflow's own bot identity — only meaningful for the push trigger, since schedule/
+# workflow_dispatch runs were never triggered by a commit in the first place.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'model-selection-log.jsonl'
+  schedule:
+    - cron: '0 * * * *'  # hourly, matching the finest window (Last 1 hour) this dashboard shows
+  workflow_dispatch: {}  # manual "Run workflow" button / gh workflow run, for testing on demand
+
+permissions:
+  contents: write
+
+jobs:
+  update-dashboard:
+    if: github.event_name != 'push' || github.event.head_commit.author.name != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate dashboard
+        run: python3 generate_dashboard.py
+
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet README.md; then
+            echo "no change to README.md, nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "regenerate dashboard"
+          git push

@@ -283,12 +283,31 @@ script instead pulls the latest remote state, takes the deduplicated union of (r
 (your own local entries), and pushes — retrying the pull/merge/push cycle if someone else pushed
 in between. Validated with a real simulated-concurrent-push test, not just assumed to work.
 
-**A dashboard, if more than one person is contributing:** add a small GitHub Action to your
-private repo that regenerates a README section (overall stats, plus a per-contributor breakdown
-once there's more than one) on every push to the log — visible the moment anyone opens the repo,
-no separate hosting needed. GitHub Pages would be the more visual option, but it needs a paid plan
-to work on a private repo; a README table works on any plan. Not included here for the same reason
-as the sync script — it depends on the private repo's own structure, which is yours to set up.
+**A dashboard, so the numbers are visible without running anything:**
+`multi-contributor-sync-template/generate_dashboard.py` +
+`multi-contributor-sync-template/.github/workflows/update-dashboard.yml` are a working reference
+for this too — copy both into your private repo (workflow file included, so the `.github/`
+structure carries over as-is) and it renders straight into the README, visible the moment anyone
+opens the repo, no separate hosting needed. GitHub Pages would be the more visual option, but it
+needs a paid plan to work on a private repo; a README table works on any plan. What it renders:
+
+- **Overall totals**, plus a per-tier breakdown and a **per-contributor breakdown** once there's
+  more than one person in the data — shown by default, not gated behind a second contributor
+  showing up.
+- **A rolling-window table** — Last 1 hour / 24 hours / 7 days / 30 days / 1 year / all-time, each
+  computed fresh relative to generation time, so a quiet week doesn't leave the recent-activity
+  rows showing stale numbers from whenever the last delegation happened to land.
+- **An all-tier baseline comparison** — actual spend against what it would have cost had
+  *everything* run on haiku, sonnet, opus, or fable, not just the opus baseline used for the
+  headline savings figure. The haiku row is expected to show actual spend running *over* that
+  baseline (real work sometimes genuinely needs more than haiku) — that's the correct sign, not a
+  bug.
+
+The workflow triggers on every push to the log (so new delegations show up within seconds, same as
+the real-time sync above) **and** on an hourly schedule independent of that, specifically so the
+rolling-window table stays honest during quiet periods rather than freezing at whatever was true
+at the last push — a scheduled re-run on GitHub's own infrastructure catches that even if no new
+data ever lands. A `workflow_dispatch` trigger is included too, for a manual "Run workflow" test.
 
 No dependencies beyond Python's standard library. Sample output:
 
@@ -334,6 +353,8 @@ model-selection-report.py                                                    sta
 model-selection-hook-install.sh                                              installs the enforcement hooks — see Deterministic enforcement
 model-selection-hook-install.py                                              the actual hook merge logic, called by the .sh wrapper
 multi-contributor-sync-template/sync.sh                                      merge-safe sync reference for a shared private log repo
+multi-contributor-sync-template/generate_dashboard.py                        dashboard reference — rolling windows + all-tier baseline comparison
+multi-contributor-sync-template/.github/workflows/update-dashboard.yml       dashboard workflow reference — push-triggered + hourly + manual
 .github/workflows/verify-skill-package.yml                                   CI: fails loudly if the .skill goes stale
 ```
 
