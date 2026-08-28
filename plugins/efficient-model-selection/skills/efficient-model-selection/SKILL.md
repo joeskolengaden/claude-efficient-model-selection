@@ -233,6 +233,25 @@ something Claude has to remember to do:
   background delegation, its entry reached GitHub seconds after completion. May fire redundantly
   alongside `PostToolUse` for foreground delegations; harmless, the sync script's lock collapses
   redundant triggers into one run.
+- **`SessionStart`**: every hook above only has anything to act on once a delegation is already
+  being attempted or a substantial prompt comes in — a session that never reaches either point
+  never sees the rubric at all, which matters since "force every chat to go through the model
+  allocation process" means the whole session, not just the delegation-shaped parts of it. This
+  hook fires once, at the very start of every session, and injects the condensed core rubric
+  (tiers, splitting mixed-difficulty work, escalation, reporting, override) directly into context
+  — the actual guidance, not a pointer to go call `Skill`, so it's genuinely present from turn one
+  regardless of whether a delegation ever happens. Unlike the rejected embedded-rubric `PreToolUse`
+  design (which paid that cost on every single delegation), this pays it exactly once per session —
+  a materially different, much cheaper tradeoff — and in practice should make the `PreToolUse`
+  retry-via-`Skill` path fire less often too, since a session already primed with the rubric is
+  more likely to set a valid tier on the first attempt. This hook injects fixed content
+  unconditionally, without reading any field from `SessionStart`'s own input, so — unlike
+  `UserPromptSubmit` and `SubagentStop` — there was no schema to verify empirically before
+  building it. **Not yet live-fire-tested**: `SessionStart` fires once per session, before that
+  session's transcript exists to hook into, so it can't be proven the way the others were within
+  the same session that installs it — that requires an actual new session start. Confirm it
+  yourself by starting a fresh session and checking whether the tier guidance is already present
+  before any delegation happens.
 
 Install with `~/.claude/tools/model-selection-hook-install.sh` (or its `.py` counterpart directly)
 — safe to re-run, merges into `~/.claude/settings.json` without touching unrelated settings, and

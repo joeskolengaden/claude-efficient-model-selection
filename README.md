@@ -169,6 +169,17 @@ runs, not something Claude has to remember:
   notification, which never fires `PostToolUse`. `SubagentStop` fires at true completion instead
   (confirmed with a temporary diagnostic hook before relying on it, not guessed) — live-tested with
   a real background delegation, its entry reached GitHub seconds after completion.
+- On `SessionStart` — once, at the very start of every session — injects the condensed core rubric
+  directly into context, not a pointer to go call `Skill`. Every other hook above only has
+  something to act on once a delegation is already being attempted; a session that never reaches
+  that point never sees the rubric at all otherwise. Pays that cost once per session rather than
+  per delegation (the opposite tradeoff from the rejected embedded-rubric `PreToolUse` design), and
+  in practice should make the `PreToolUse` retry-via-`Skill` path fire less often too, since a
+  session already primed with the rubric is more likely to set a valid tier on the first attempt.
+  **Not yet live-fire-tested** — `SessionStart` fires once per session, before that session's
+  transcript exists to verify against, so this one can't be proven from within the same session
+  that installs it the way the others were. Confirm it yourself: start a fresh session and check
+  whether the tier guidance is already present before any delegation happens.
 
 Installs into `~/.claude/settings.json` (user-level, so it covers every project), safe to re-run,
 and reports rather than overwrites if you've already got a different hook on the same

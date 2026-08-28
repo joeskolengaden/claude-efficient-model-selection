@@ -43,6 +43,20 @@ enforced, deterministically, instead of depending on the model remembering:
     last_assistant_message matching the eventual task-notification result exactly. It may also
     fire redundantly alongside PostToolUse for foreground delegations — harmless, the shared
     script's lock collapses redundant triggers into one effective run.
+  - SessionStart: every hook above only has anything to act on once a delegation is already being
+    attempted or a substantial prompt comes in — a session that never reaches either point never
+    sees the rubric at all. This one closes that: it fires once, at the very start of every
+    session, and injects the condensed core rubric (tiers, splitting mixed-difficulty work,
+    escalation, reporting, override) directly into context — not a pointer to go call Skill, the
+    actual guidance, so it's genuinely present from turn one regardless of whether a delegation
+    ever happens. Unlike the old embedded-rubric PreToolUse design (rejected for paying that cost
+    on every delegation), this pays it exactly once per session, which is a materially different
+    tradeoff — and in practice it should make the PreToolUse retry-via-Skill path fire less often
+    too, since a session primed with the rubric from the start is more likely to set a valid tier
+    on its first attempt. This hook doesn't read any field from SessionStart's own input — it
+    injects fixed content unconditionally — so unlike UserPromptSubmit and SubagentStop, there was
+    no schema to verify empirically before building it; the risk that motivated verifying those
+    (misreading an unfamiliar field) doesn't apply here.
 
 Honest limit, unchanged by this script: a hook can force a *block* deterministically, but it cannot
 force which specific action Claude takes next — the retry instruction can't literally compel a
@@ -98,6 +112,23 @@ PROMPT_SUBMIT_CONTEXT = (
     "restart loops, or anything where each step depends on the last result stays in the main loop."
 )
 SYNC_TRIGGER_COMMAND = '"$HOME/.claude/tools/model-selection-hourly-update.sh"'
+SESSION_START_CONTEXT = (
+    "efficient-model-selection is active this session. Before any delegation - an Agent call, a "
+    "Workflow agent() call, or splitting a multi-step task into pieces - pick the cheapest tier "
+    "that genuinely fits: HAIKU for routine/mechanical/checkable work (listing, grepping, "
+    "fetch+summarize, mechanical edits). SONNET for multi-step work needing synthesis/judgment "
+    "across a few things, or the default when unsure. OPUS for real ambiguity, conflicting "
+    "inputs, or costly-if-wrong decisions. FABLE reserved for the deepest reasoning or a "
+    "documented cheaper-tier failure only - a task mattering a lot is not by itself a reason for "
+    "it. Split mixed-difficulty work across tiers rather than running it all on one. Default down "
+    "when unsure; if the result from a chosen tier is inadequate, escalate exactly one tier up "
+    "and say why. Report the tier and a short reason back to the user in a visually distinct way (a "
+    "colored badge via a widget tool if available, else a blockquote callout) every time a "
+    "delegation happens, not only if asked. A direct user instruction naming a model or tier "
+    "always wins immediately, no pushback. Call the Skill tool with skill: "
+    "efficient-model-selection for the complete rubric, including exact per-tier criteria, "
+    "generation-pinning, and savings tracking."
+)
 
 
 def jq_pre_command(if_clause, reason):
@@ -133,6 +164,13 @@ def jq_prompt_submit_command(context):
     )
 
 
+def jq_session_start_command(context):
+    return (
+        "jq '{hookSpecificOutput: {hookEventName: \"SessionStart\", additionalContext: "
+        '"' + context.replace('"', '\\"') + '"}}\''
+    )
+
+
 def cmd_hook(command, async_=False):
     h = {"type": "command", "command": command}
     if async_:
@@ -163,6 +201,7 @@ DESIRED = {
     ],
     ("UserPromptSubmit", None): [cmd_hook(jq_prompt_submit_command(PROMPT_SUBMIT_CONTEXT))],
     ("SubagentStop", None): [cmd_hook(SYNC_TRIGGER_COMMAND, async_=True)],
+    ("SessionStart", None): [cmd_hook(jq_session_start_command(SESSION_START_CONTEXT))],
 }
 
 # Prior reason texts this script has shipped for the two PreToolUse hooks, kept only so an
