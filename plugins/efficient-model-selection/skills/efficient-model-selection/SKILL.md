@@ -199,18 +199,29 @@ inheriting whatever the main model happened to be.
 The fix is a Claude Code hook — code the harness itself runs before/after a tool call, not
 something Claude has to remember to do:
 
-- **`PreToolUse` on `Agent`**: blocks any call with no `model` field set. The block's denial reason
-  instructs calling the `Skill` tool (`efficient-model-selection`) before retrying with an explicit
-  tier. An earlier version of this hook embedded the rubric directly in the block text instead —
-  cheaper per-delegation (no extra round-trip), but it meant the tier could be set correctly
-  without the skill ever actually being invoked, so the skill's own trigger count stayed near zero
-  even while the system worked. This version trades one extra tool call per untiered delegation for
-  that visibility, by deliberate choice — not because the embedded-rubric version was broken.
-  Setting `model` to the current model explicitly (a deliberate inherit) still passes either way.
-- **`PreToolUse` on `Workflow`**: best-effort text check — blocks a script that calls `agent()`
-  anywhere but sets `opts.model` nowhere in the whole script, with the same call-Skill-first
-  instruction. This cannot verify per-call coverage (some calls tiered, others not slips through);
-  it only catches total omission.
+- **`PreToolUse` on `Agent` and `Workflow`** — a two-part gate, run by
+  `model-selection-consult-check.py` rather than an inline filter, because the second half has to
+  read the session transcript. A delegation is blocked unless **both** hold:
+  1. **A tier is set.** `Agent` must carry an explicit `model`; a `Workflow` script that calls
+     `agent()` must set `opts.model` somewhere (best-effort — total omission only, so some calls
+     tiered and others not still slips through). Setting `model` to the current model explicitly,
+     as a deliberate inherit, passes.
+  2. **The skill has actually been consulted this session** — a real `Skill` invocation of it
+     appears earlier in the transcript. This is the part every earlier version missed: a tier set
+     from memory, with the skill never once opened, passed silently. Required **once per session,
+     not per delegation** — later calls pass straight through, since re-reading the whole rubric
+     before every call would be pure waste.
+
+  Detection parses `tool_use` blocks properly and never greps. The transcript legitimately contains
+  this skill's name in the `SessionStart` injected rubric, in this hook's own denial text, and in
+  unrelated calls that merely mention it — a substring match would read all of those as proof of
+  consultation and silently disable the gate. Verified against a fixture containing exactly those
+  three decoys and nothing else: correctly reads as *not consulted*.
+
+  **Fails open, loudly.** If the transcript is unreadable or the payload has an unexpected shape,
+  the consultation half is skipped (the tier check still applies) and a `systemMessage` says why.
+  For a gate sitting in front of every delegation in every project, visible non-enforcement beats
+  an invisible deadlock caused by a bug in the checker.
 - **`PostToolUse` on both**: after a delegation completes, injects a reminder to report the tier
   and reason back to the user visibly, per "Report the choice" above — and, in the same slot,
   triggers the delegation-log sync in the background so the GitHub log updates within seconds

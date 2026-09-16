@@ -148,13 +148,19 @@ runs, not something Claude has to remember:
 ./model-selection-hook-install.sh
 ```
 
-- Blocks any `Agent` call with no `model` set — the denial reason instructs calling the `Skill`
-  tool before retrying with an explicit tier. (An earlier version embedded the rubric directly in
-  the block instead, which set tiers correctly but meant the skill's own trigger count stayed near
-  zero even while working — this trades one extra tool call per untiered delegation for actual
-  visibility into whether the system is doing anything.)
-- Best-effort blocks a `Workflow` script that calls `agent()` but sets `opts.model` nowhere in the
-  whole script (can't verify partial coverage, only total omission), same call-Skill-first denial.
+- Blocks an `Agent`/`Workflow` delegation unless **both** hold: a model tier is explicitly set,
+  **and** the skill has actually been consulted in this session. The second half is the point —
+  every earlier version only checked that a tier was set, so a tier picked from memory with the
+  skill never once opened passed silently. Consultation is required once per session, not before
+  every delegation.
+- That check reads the session transcript (`transcript_path`, confirmed present in a real
+  `PreToolUse` payload before relying on it), parsing `tool_use` blocks rather than grepping —
+  the transcript contains this skill's name in the injected session rubric, in the hook's own
+  denial text, and in unrelated calls that merely mention it, so a substring match would count
+  those as consultation and quietly disable the gate. Verified against a decoys-only fixture.
+- Fails open with a visible `systemMessage` if the transcript is unreadable or the payload shape
+  is unexpected — for a gate in front of every delegation, visible non-enforcement beats an
+  invisible deadlock.
 - After a delegation completes, injects a reminder to report the tier back to the user visibly,
   and triggers the delegation log's GitHub sync in the background — see Tracking savings below.
 - On a substantial or multi-part incoming prompt (word count ≥ 40, or 2+ newlines, or a numbered
@@ -363,6 +369,7 @@ model-selection-hourly-update-install.sh                                     ins
 model-selection-report.py                                                    standalone savings report — see Tracking savings
 model-selection-hook-install.sh                                              installs the enforcement hooks — see Deterministic enforcement
 model-selection-hook-install.py                                              the actual hook merge logic, called by the .sh wrapper
+model-selection-consult-check.py                                             the PreToolUse gate itself: tier set AND skill actually consulted
 multi-contributor-sync-template/sync.sh                                      merge-safe sync reference for a shared private log repo
 multi-contributor-sync-template/generate_dashboard.py                        dashboard reference — rolling windows + all-tier baseline comparison
 multi-contributor-sync-template/.github/workflows/update-dashboard.yml       dashboard workflow reference — push-triggered + hourly + manual

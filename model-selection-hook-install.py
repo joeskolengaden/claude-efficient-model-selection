@@ -8,15 +8,22 @@ choose to go read the full rubric. Measured against 51 real sessions on the mach
 on, that happened twice (4%). These hooks make the enforceable parts of the skill actually
 enforced, deterministically, instead of depending on the model remembering:
 
-  - PreToolUse on Agent/Workflow: blocks a delegation that has no model tier set at all, and the
-    block's own reason text instructs Claude to call the Skill tool (efficient-model-selection)
-    before retrying. An earlier version of this hook embedded the rubric directly in the block
-    text instead, so the tier could be set correctly without ever invoking the skill — cheaper
-    per-delegation (no extra round-trip), but it meant the skill's actual usage/trigger count
-    stayed near zero even while working correctly, which undercut visibility into whether the
-    system was doing anything at all. This version trades a small per-delegation cost (one extra
-    tool call) for that visibility, by design choice, not because the embedded-rubric version was
-    broken.
+  - PreToolUse on Agent/Workflow: a two-part gate, run by model-selection-consult-check.py rather
+    than an inline jq filter, because the second half needs to read the session transcript.
+    (1) The call must set a model tier at all, and (2) the skill must actually have been consulted
+    — a real Skill tool_use for it somewhere earlier in this session — before any task is assigned
+    to a model. Part (2) is the addition: every earlier version enforced only (1), so a tier set
+    from memory, with the skill never once opened, sailed through silently. Consultation is
+    required once per session, not before every delegation; later calls in the same session pass
+    straight through, since re-reading the whole rubric per delegation would be pure waste.
+    Detection parses tool_use blocks properly and never greps: the transcript legitimately
+    contains this skill's name in the SessionStart injected rubric, in this hook's own denial
+    text, and in unrelated calls that merely mention it, and a substring match would count all of
+    those as proof of consultation — silently disabling the gate it implements.
+    Two earlier generations of this hook are recognized for silent in-place upgrade: v1 embedded
+    the rubric directly in the denial text (cheap, but meant the skill was almost never actually
+    invoked), v2 replaced that with a call-Skill-first instruction (traded one extra tool call for
+    real trigger visibility).
   - PostToolUse on Agent/Workflow: after a delegation completes, (1) injects a reminder to report
     the tier and reason back to the user visibly (colored badge via a widget tool if available,
     else a blockquote callout), and (2) triggers model-selection-hourly-update.sh in the
@@ -77,21 +84,12 @@ from pathlib import Path
 
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
-AGENT_PRE_REASON = (
-    "No model tier set. Call the Skill tool now with skill: efficient-model-selection to load "
-    "the full tier rubric, then retry this call with an explicit model (haiku/sonnet/opus/fable, "
-    "or the current model only if deliberately inheriting it, never as a default). When this "
-    "delegation completes, report the tier and a short reason to the user in a visually distinct "
-    "way (a colored badge via a widget tool if available, else a blockquote callout) - every "
-    "time, not only if asked."
-)
-WORKFLOW_PRE_REASON = (
-    "This Workflow script calls agent() but sets opts.model nowhere. Call the Skill tool now "
-    "with skill: efficient-model-selection to load the full tier rubric, then set opts.model on "
-    "each agent() call and retry. (Best-effort check: total omission only, not per-call "
-    "coverage.) Report the tier and a short reason for each delegation to the user in a visually "
-    "distinct way when this completes - every time, not only if asked."
-)
+# The PreToolUse gate is a script, not a jq filter — it has to read the session transcript to
+# answer "was the skill actually consulted?", which jq alone can't do from the hook payload.
+# Invoked via an explicit python3 so it does not depend on the file's exec bit or on PATH.
+CONSULT_CHECK_COMMAND = 'python3 "$HOME/.claude/tools/model-selection-consult-check.py"'
+CONSULT_CHECK_PATH = Path.home() / ".claude" / "tools" / "model-selection-consult-check.py"
+
 AGENT_POST_CONTEXT = (
     "Reminder (efficient-model-selection): report the tier used for this delegation and a short "
     "reason to the user in a visually distinct way - a colored badge via a widget tool if "
@@ -189,8 +187,8 @@ WORKFLOW_PRE_IF_CLAUSE = (
 # since it first shipped) plus the new real-time sync trigger, run async so it never adds latency
 # to the delegation itself.
 DESIRED = {
-    ("PreToolUse", "Agent"): [cmd_hook(jq_pre_command(AGENT_PRE_IF_CLAUSE, AGENT_PRE_REASON))],
-    ("PreToolUse", "Workflow"): [cmd_hook(jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, WORKFLOW_PRE_REASON))],
+    ("PreToolUse", "Agent"): [cmd_hook(CONSULT_CHECK_COMMAND)],
+    ("PreToolUse", "Workflow"): [cmd_hook(CONSULT_CHECK_COMMAND)],
     ("PostToolUse", "Agent"): [
         cmd_hook(jq_post_command(AGENT_POST_CONTEXT)),
         cmd_hook(SYNC_TRIGGER_COMMAND, async_=True),
@@ -230,12 +228,33 @@ _WORKFLOW_PRE_REASON_V1 = (
     "coverage.) Report the tier and a short reason for each delegation to the user in a visually "
     "distinct way when this completes - every time, not only if asked."
 )
+# v2 shipped after v1: the rubric came out of the denial text, replaced by an instruction to call
+# the Skill tool before retrying. Registered here because v2 is what is currently deployed on
+# existing installs — without it, the upgrade to the script-based gate reports a false conflict
+# instead of replacing cleanly.
+_AGENT_PRE_REASON_V2 = (
+    "No model tier set. Call the Skill tool now with skill: efficient-model-selection to load "
+    "the full tier rubric, then retry this call with an explicit model (haiku/sonnet/opus/fable, "
+    "or the current model only if deliberately inheriting it, never as a default). When this "
+    "delegation completes, report the tier and a short reason to the user in a visually distinct "
+    "way (a colored badge via a widget tool if available, else a blockquote callout) - every "
+    "time, not only if asked."
+)
+_WORKFLOW_PRE_REASON_V2 = (
+    "This Workflow script calls agent() but sets opts.model nowhere. Call the Skill tool now "
+    "with skill: efficient-model-selection to load the full tier rubric, then set opts.model on "
+    "each agent() call and retry. (Best-effort check: total omission only, not per-call "
+    "coverage.) Report the tier and a short reason for each delegation to the user in a visually "
+    "distinct way when this completes - every time, not only if asked."
+)
 KNOWN_PRIOR_HOOK_LISTS = {
     ("PreToolUse", "Agent"): [
         [cmd_hook(jq_pre_command(AGENT_PRE_IF_CLAUSE, _AGENT_PRE_REASON_V1))],
+        [cmd_hook(jq_pre_command(AGENT_PRE_IF_CLAUSE, _AGENT_PRE_REASON_V2))],
     ],
     ("PreToolUse", "Workflow"): [
         [cmd_hook(jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, _WORKFLOW_PRE_REASON_V1))],
+        [cmd_hook(jq_pre_command(WORKFLOW_PRE_IF_CLAUSE, _WORKFLOW_PRE_REASON_V2))],
     ],
     # v1 of the PostToolUse hooks shipped with only the reporting reminder, before the real-time
     # sync trigger was added — recognized here so that upgrade is also silent and automatic.
@@ -255,6 +274,15 @@ def load_settings():
 
 
 def main():
+    # The PreToolUse gate is the one hook that lives in a separate file; warn loudly rather than
+    # silently installing a hook command that points at nothing.
+    if not CONSULT_CHECK_PATH.exists():
+        print(
+            f"warning: {CONSULT_CHECK_PATH} not found — the PreToolUse gate will allow everything "
+            f"until that script is in place. Copy it from the skill repo alongside this one.",
+            file=sys.stderr,
+        )
+
     settings = load_settings()
     hooks = settings.setdefault("hooks", {})
 
