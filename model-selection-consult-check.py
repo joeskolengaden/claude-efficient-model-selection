@@ -71,13 +71,25 @@ def emit(decision, reason=None, system_message=None):
     sys.exit(0)
 
 
+def is_delegation(tool_name, tool_input):
+    """Does this call actually hand work to another model?
+
+    Every Agent call does. A Workflow script only does if it calls agent() somewhere — a script
+    that just runs code delegates nothing, and neither half of this gate should apply to it.
+    """
+    if tool_name != "Workflow":
+        return True
+    script = tool_input.get("script")
+    if not isinstance(script, str):
+        return True  # can't inspect it; assume it delegates rather than waving it through
+    return "agent(" in script
+
+
 def tier_is_set(tool_name, tool_input):
     if tool_name == "Workflow":
         script = tool_input.get("script")
         if not isinstance(script, str):
             return True  # nothing to inspect; don't invent a violation
-        if "agent(" not in script:
-            return True  # no delegation in this script at all
         return "model:" in script
     model = tool_input.get("model")
     return isinstance(model, str) and model.strip() != ""
@@ -128,6 +140,13 @@ def main():
 
     tool_name = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
+
+    # A Workflow script that never calls agent() delegates nothing, so neither half of this gate
+    # applies. Without this early-out the consultation check below denied such a script purely for
+    # not having consulted a *delegation* rubric — a false positive found by auditing this hook,
+    # not by it ever firing in anger.
+    if not is_delegation(tool_name, tool_input):
+        emit("allow")
 
     if not tier_is_set(tool_name, tool_input):
         emit("deny", WORKFLOW_TIER_MISSING_REASON if tool_name == "Workflow" else TIER_MISSING_REASON)

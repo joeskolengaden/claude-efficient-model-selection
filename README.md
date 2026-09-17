@@ -137,9 +137,12 @@ Then upload the resulting `efficient-model-selection.skill` as in step 2 above.
 
 Everything above is advisory by default — Claude Code shows every session a one-line description
 of this skill, and it's up to the model in that session to notice a delegation is coming and
-choose to read the full rubric. Measured across 51 real sessions on the machine this was built on,
-that happened in 2 (4%) — one of those was the skill's own creation/self-test session. The other
-49 sessions delegated work with no tier considered at all.
+choose to read the full rubric. Measured on 2026-08-08, *before any enforcement existed*, across 51
+real sessions on the machine this was built on, that happened in 2 (4%) — one of those was the
+skill's own creation/self-test session. The other 49 sessions delegated work with no tier
+considered at all. That measurement is why the hooks below exist; a re-audit on 2026-09-16, after
+they shipped, found 12 consultations across 58 sessions and seven projects rather than two. Both
+figures are dated deliberately — they describe different regimes, and the 4% is no longer current.
 
 `model-selection-hook-install.sh` closes that gap with Claude Code hooks — code the harness itself
 runs, not something Claude has to remember:
@@ -249,6 +252,18 @@ report ~80% "savings" while producing garbage. The counterweight is the escalati
 a cheap tier had to be retried higher), printed alongside savings **including when it is zero** —
 a zero cannot distinguish "tiers were chosen well" from "bad results went unnoticed", so hiding it
 would make savings look like an unqualified win.
+
+**The log is also incomplete, and not randomly so.** An audit on 2026-09-17 found 24 delegations
+stranded in the extractor's `pending_background` state against 36 actually logged — 40% of known
+delegations never reached the log at all. These are background delegations (`run_in_background:
+true`) whose completion notification never arrived, usually because the session ended before the
+agent finished; the pending set is never pruned, so it grows without bound. The bias matters more
+than the volume: the stranded mix is 18 sonnet / 4 opus / 2 haiku, against a logged mix that is
+one-third haiku. Cheap work is over-represented in what got recorded, so the reported savings
+percentage is **overstated**, not merely noisy. Three of the 24 do have completion notifications
+sitting in transcripts and are recoverable — a matching gap, not a lost result; the other 21
+genuinely never finished. Treat the headline percentage as an optimistic bound until that gap is
+closed.
 
 Since the zero-cost extractor cannot observe escalations at all, `--audit` adds the other signal
 the log *does* capture for free: effort actually expended (`tool_uses`, `duration_ms`) against the

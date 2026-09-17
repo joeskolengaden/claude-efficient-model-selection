@@ -191,10 +191,14 @@ already the documented fallback, not a downgrade to invent on the spot.
 
 Everything above this point is advisory — it only takes effect if the acting Claude in a given
 session notices a delegation is coming and chooses to consult this skill. That is not a
-hypothetical gap: measured across 51 real sessions on the machine this was built on, that happened
-in 2 of them (4%) — one of those was the skill's own creation/self-test session, not an
-independent trigger. The other 49 sessions delegated work with no tier considered at all, silently
-inheriting whatever the main model happened to be.
+hypothetical gap: measured on 2026-08-08, *before any enforcement existed*, across 51 real sessions
+on the machine this was built on, that happened in 2 of them (4%) — one of those was the skill's
+own creation/self-test session, not an independent trigger. The other 49 sessions delegated work
+with no tier considered at all, silently inheriting whatever the main model happened to be. That
+measurement is why the hooks below exist. A re-audit on 2026-09-16, after they shipped, found 12
+consultations across 58 sessions, spread over seven different projects rather than the original
+two — quote the dated figures rather than a bare percentage, since both numbers describe different
+regimes and the older one is not the current state.
 
 The fix is a Claude Code hook — code the harness itself runs before/after a tool call, not
 something Claude has to remember to do:
@@ -442,10 +446,20 @@ repo.
 token count would have cost at Opus's blended rate (the true no-skill default — absent this skill,
 the documented default behavior for delegated work is Opus, not the more expensive Fable, so Opus
 is the honest counterfactual, not the ceiling tier) versus what it actually cost at the tier used.
-Sum both across all entries and report the difference. State plainly that this is an estimate: the
-`<usage>` field is a single blended token count with no input/output split, so cost is computed
-from each tier's average of its input and output price, not exact per-token billing. Never present
-the number as more precise than that.
+Sum both across all entries and report the difference. State plainly that this is an estimate, and
+that it rests on three separate approximations, not one:
+- **Blended rate.** The `<usage>` field is a single token count with no input/output split, so
+  cost uses each tier's average of its input and output price, not exact per-token billing.
+- **Equal token counts across tiers.** The counterfactual multiplies the *same* token count by a
+  different tier's rate. A different tier would not necessarily have used the same number of
+  tokens for the same task, so this is a modelling assumption, not an observation — the real
+  counterfactual was never run and cannot be.
+- **Prices drift.** The rate constants are hardcoded in `model-selection-report.py` and
+  `generate_dashboard.py` and are only as current as the day they were last checked. Re-verify
+  them before treating any dollar figure as authoritative; the *ratios* between tiers are the
+  durable part, the absolute numbers are not.
+
+Never present the result as more precise than that.
 
 **Never report savings bare — it is a one-sided metric.** It rises whenever work moves to a
 cheaper tier, whether or not the result held up; a log that ran everything on Haiku would show
