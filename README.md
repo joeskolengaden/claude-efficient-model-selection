@@ -240,7 +240,25 @@ python3 model-selection-report.py --by-month    # + a breakdown per month
 python3 model-selection-report.py --by-host     # + a breakdown per machine (hostname)
 python3 model-selection-report.py --by-user     # + a breakdown per local username
 python3 model-selection-report.py --by-project  # + a breakdown per project
+python3 model-selection-report.py --audit       # flag suspected mis-tiers (see below)
 ```
+
+**Savings is a one-sided metric — the report never shows it bare.** It rises whenever work moves
+to a cheaper tier, whether or not the result held up: a log that ran everything on haiku would
+report ~80% "savings" while producing garbage. The counterweight is the escalation rate (how often
+a cheap tier had to be retried higher), printed alongside savings **including when it is zero** —
+a zero cannot distinguish "tiers were chosen well" from "bad results went unnoticed", so hiding it
+would make savings look like an unqualified win.
+
+Since the zero-cost extractor cannot observe escalations at all, `--audit` adds the other signal
+the log *does* capture for free: effort actually expended (`tool_uses`, `duration_ms`) against the
+tier that ran it. It flags cheap tiers that worked unusually hard (long autonomous runs are where a
+higher tier tends to earn its cost) and expensive tiers that finished trivially. Thresholds are
+derived from an observed log rather than picked arbitrarily — haiku delegations there clustered at
+1–25 tool calls while sonnet routinely ran 20–55, so a haiku run at 20+ sits in the tier above's
+effort range. These are candidates for review, never verdicts: the log records what a delegation
+cost and how hard it worked, never whether its output was any good, so a clean audit is not
+evidence that every tier choice was right.
 
 `model-selection-hourly-update.sh` runs extraction and the private-backup sync (below) as one
 combined job — extraction always finishes before sync reads the file, rather than two

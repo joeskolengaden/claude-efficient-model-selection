@@ -447,6 +447,17 @@ Sum both across all entries and report the difference. State plainly that this i
 from each tier's average of its input and output price, not exact per-token billing. Never present
 the number as more precise than that.
 
+**Never report savings bare — it is a one-sided metric.** It rises whenever work moves to a
+cheaper tier, whether or not the result held up; a log that ran everything on Haiku would show
+~80% "savings" while producing garbage. Always report the escalation rate alongside it, *including
+when it is zero*, and say what a zero actually means: with no escalations recorded, the number
+cannot distinguish "tiers were chosen well" from "bad results went unnoticed." If the user wants
+to go further, `model-selection-report.py --audit` flags the other signal the log does capture —
+effort expended (`tool_uses`, `duration_ms`) against the tier that ran it, surfacing cheap tiers
+that worked unusually hard and expensive tiers that finished trivially. Those are candidates for
+review, not verdicts: nothing in the log records whether any delegation's output was actually
+good, so a clean audit is not evidence that every tier choice was right.
+
 ## Quick reference
 
 | Signal | Tier |

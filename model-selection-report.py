@@ -11,6 +11,7 @@ tier (Fable), so it's the honest comparison rather than the most flattering one.
 
 Usage:
     python3 model-selection-report.py             # full summary
+    python3 model-selection-report.py --audit      # flag suspected mis-tiers (see below)
     python3 model-selection-report.py --by-month   # also break down by month
     python3 model-selection-report.py --by-day     # also break down by day
     python3 model-selection-report.py --by-host    # also break down by hostname
@@ -20,6 +21,18 @@ Usage:
 Entries logged before a given field was added won't have it — they're grouped under "(unknown)"
 in the relevant --by-* output rather than dropped. Escalation count and average duration are
 shown per group whenever at least one entry in that group carries the relevant field.
+
+Why --audit exists: savings is a ONE-SIDED metric. It rises whenever work moves to a cheaper
+tier, whether or not the result held up — a log that ran everything on haiku would report ~80%
+"savings" while producing garbage, and nothing else here would catch it. The honest counterweight
+is the escalation rate (how often a cheap tier had to be retried higher), which is reported
+alongside savings, including — especially — when it is zero. Since the zero-cost extractor cannot
+see escalations at all (see SKILL.md, "Track delegations"), --audit adds the other available
+signal: effort actually expended, which IS recorded per delegation as tool_uses and duration_ms.
+A cheap tier that burned many tool calls over a long run is a candidate for having been
+under-tiered; an expensive tier that finished trivially is a candidate for overspend. These are
+flags for review, never verdicts — the log records what a delegation cost, never whether its
+output was any good.
 """
 import json
 import sys
@@ -70,6 +83,7 @@ def summarize(entries, label="Overall"):
     counterfactual_total = 0.0
     durations = []
     escalations = 0
+    escalation_trackable = 0
 
     for e in entries:
         tier = e.get("tier", "unknown")
@@ -80,6 +94,10 @@ def summarize(entries, label="Overall"):
         counterfactual_total += cost(tokens, BASELINE_TIER)
         if e.get("duration_ms") is not None:
             durations.append(e["duration_ms"])
+        # Distinguish "field absent" (logged before the field existed) from "present and null"
+        # (a real delegation that was not an escalation) — only the latter is a tracked zero.
+        if "escalated_from" in e:
+            escalation_trackable += 1
         if e.get("escalated_from"):
             escalations += 1
 
@@ -101,9 +119,68 @@ def summarize(entries, label="Overall"):
     if durations:
         print(f"  Avg duration:           {sum(durations)/len(durations)/1000:.1f}s "
               f"(over {len(durations)} entries with duration recorded)")
-    if escalations:
-        print(f"  Escalations:            {escalations} of {len(entries)} were retries after a "
-              f"cheaper tier failed")
+    # Always print this, including when it is zero — a zero escalation rate is the single most
+    # informative number here, and hiding it (as this line used to, behind `if escalations:`)
+    # left savings looking like an unqualified win. It is not: savings only measures that work
+    # moved to cheaper tiers, never that the results held up.
+    if escalation_trackable:
+        print(f"  Escalations:            {escalations} of {escalation_trackable} trackable "
+              f"({'none recorded — see --audit' if not escalations else 'retries after a cheaper tier fell short'})")
+
+
+# Effort thresholds for the heuristics below, set from the observed shape of a real log rather
+# than picked out of the air: haiku delegations there clustered at 1-25 tool calls, while sonnet
+# routinely ran 20-55. A haiku run at or above UNDER_TIER_TOOLS therefore sits squarely in the
+# effort range of the tier above it. Re-derive these if the mix shifts; they are a starting point,
+# not a constant of nature.
+UNDER_TIER_TOOLS = 20
+UNDER_TIER_SECONDS = 300
+OVER_TIER_TOOLS = 2
+OVER_TIER_SECONDS = 30
+CHEAP_TIERS = ("haiku",)
+EXPENSIVE_TIERS = ("opus", "fable")
+
+
+def audit(entries):
+    """Flag delegations whose effort looks mismatched to the tier that ran them.
+
+    Deliberately not a verdict: the log records what a delegation cost and how hard it worked,
+    never whether its output was any good. A flag here means "worth a look", nothing more.
+    """
+    under, over = [], []
+    for e in entries:
+        tier = e.get("tier")
+        tools = e.get("tool_uses")
+        dur_ms = e.get("duration_ms")
+        if tools is None or dur_ms is None:
+            continue  # logged before effort fields existed; nothing to judge
+        seconds = dur_ms / 1000
+        if tier in CHEAP_TIERS and (tools >= UNDER_TIER_TOOLS or seconds >= UNDER_TIER_SECONDS):
+            under.append((e, tools, seconds))
+        elif tier in EXPENSIVE_TIERS and tools <= OVER_TIER_TOOLS and seconds <= OVER_TIER_SECONDS:
+            over.append((e, tools, seconds))
+
+    print("\n=== Tier audit (heuristic — candidates for review, not verdicts) ===")
+
+    def show(rows, heading, note):
+        print(f"\n  {heading}")
+        print(f"  {note}")
+        if not rows:
+            print("    (none)")
+            return
+        for e, tools, seconds in sorted(rows, key=lambda r: r[0].get("timestamp", "")):
+            print(f"    {e.get('tier','?'):7s} {tools:3d} tools {seconds:6.0f}s  "
+                  f"{e.get('task','')[:56]}")
+
+    show(under, "Suspected under-tier (cheap tier, heavy effort):",
+         "Long autonomous runs are where a higher tier tends to earn its cost. Check whether the\n"
+         "  output actually held up — if it did, the cheap tier was the right call and this is noise.")
+    show(over, "Suspected over-tier (expensive tier, trivial effort):",
+         "Finished fast with almost no tool use — likely cheaper tier territory next time.")
+
+    print("\n  Reminder: this looks only at effort, never at output quality. Nothing in the log\n"
+          "  records whether a delegation produced a good answer, so a clean audit is not\n"
+          "  evidence that every tier choice was correct.")
 
 
 def main():
@@ -113,6 +190,9 @@ def main():
         return
 
     summarize(entries, "Overall")
+
+    if "--audit" in sys.argv:
+        audit(entries)
 
     if "--by-month" in sys.argv:
         by_month = defaultdict(list)
